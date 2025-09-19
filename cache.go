@@ -82,7 +82,7 @@ func (c *Cache) Close() error {
 
 const maxInactiveDuration = 30 * time.Minute
 
-func (c *Cache) cleanup() {
+func (c *Cache) Cleanup() {
 	ticker := time.NewTicker(time.Minute)
 	defer ticker.Stop()
 
