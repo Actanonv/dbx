@@ -16,6 +16,17 @@ type Cache struct {
 	quit         chan struct{}
 }
 
+func NewCache() *Cache {
+	c := &Cache{
+		mu:           sync.Mutex{},
+		cache:        make(map[string]*bun.DB),
+		lastAccessed: make(map[string]time.Time),
+		quit:         make(chan struct{}),
+	}
+
+	return c
+}
+
 func (c *Cache) Has(name string) *bun.DB {
 	c.mu.Lock()
 	defer c.mu.Unlock()
