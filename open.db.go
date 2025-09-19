@@ -2,17 +2,12 @@ package db
 
 import (
 	"database/sql"
-	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
+	"time"
 
-	"embed"
 	"github.com/uptrace/bun"
 	"github.com/uptrace/bun/dialect/sqlitedialect"
 	"github.com/uptrace/bun/extra/bundebug"
-	"strings"
-	"time"
 )
 
 type Options struct {
