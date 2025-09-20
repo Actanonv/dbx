@@ -18,10 +18,12 @@ const (
 )
 
 // MigrateDB runs migrations on the db
-func MigrateDB(opts CreateOptions) (err error) {
-	dsn := opts.DSN
-	if opts.DriverName == DriverSQLite {
-		dbFile, err := createSQLiteDBFile(opts.DSN, opts.DbFolder)
+func MigrateDB(dsn string, opts ...CreateOptFn) (err error) {
+	option := CreateOptions{}
+	setCreateOptions(&option, opts...)
+
+	if option.driverName == DriverSQLite {
+		dbFile, err := createSQLiteDBFile(dsn, option.dbFolder)
 		if err != nil {
 			return err
 		}
@@ -29,7 +31,7 @@ func MigrateDB(opts CreateOptions) (err error) {
 		dsn = fmt.Sprintf("file:%s", dbFile)
 	}
 
-	db, err := sql.Open(string(opts.DriverName), dsn)
+	db, err := sql.Open(string(option.driverName), dsn)
 	if err != nil {
 		return err
 	}
@@ -39,7 +41,7 @@ func MigrateDB(opts CreateOptions) (err error) {
 		return err
 	}
 
-	if opts.DriverName == DriverSQLite {
+	if option.driverName == DriverSQLite {
 		_, err = db.Exec("PRAGMA journal_mode=WAL;")
 		if err != nil {
 			return fmt.Errorf("failed to enable WAL mode: %w", err)
@@ -54,11 +56,11 @@ func MigrateDB(opts CreateOptions) (err error) {
 	db.SetMaxIdleConns(1)
 	db.SetConnMaxLifetime(0)
 
-	goose.SetBaseFS(opts.Source)
-	if err := goose.SetDialect(string(opts.DriverName)); err != nil {
+	goose.SetBaseFS(option.source)
+	if err := goose.SetDialect(string(option.driverName)); err != nil {
 		return fmt.Errorf("failed to set dialect: %w", err)
 	}
-	if err := goose.Up(db, opts.SrcFolder); err != nil {
+	if err := goose.Up(db, option.srcFolder); err != nil {
 		return fmt.Errorf("failed to run migrations: %w", err)
 	}
 

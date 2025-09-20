@@ -11,6 +11,10 @@ import (
 	"github.com/uptrace/bun"
 )
 
+var (
+	dbFolder string
+)
+
 // Test setup utilities
 func setupTestDB(t *testing.T) *bun.DB {
 	t.Helper()

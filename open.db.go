@@ -103,14 +103,18 @@ func setOptions(opt *Options, opts ...OpenOptFn) {
 	if len(opts) == 0 {
 		opts = []OpenOptFn{
 			WithDriverName(DriverSQLite),
-			WithMaxOpenConns(1),
-			WithMaxIdleConns(1),
-			WithConnMaxLifetime(0),
 		}
 	}
 	// Apply all options
 	for _, optFn := range opts {
 		optFn(opt)
+	}
+
+	if opt.maxIdleConns == 0 {
+		opt.maxIdleConns = 1
+	}
+	if opt.maxOpenConns == 0 {
+		opt.maxOpenConns = 1
 	}
 
 	if opt.dbFolder == "" && opt.driverName == string(DriverSQLite) {

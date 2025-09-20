@@ -1,4 +1,4 @@
-# db
+# dbx
 
 A Go package that provides robust database management functionality with connection pooling, caching, and SQLite support
 using the Bun ORM.

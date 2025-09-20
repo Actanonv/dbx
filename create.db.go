@@ -1,51 +1,89 @@
 package dbx
 
 import (
-	"errors"
+	"database/sql"
+	"embed"
 	"fmt"
-	"os"
 	"path/filepath"
-	"strings"
 )
 
-var ErrDBFileNotFound = errors.New("db file not found")
-
-// DbFilePath converts a name into a full path to the db including the file extension
-func DbFilePath(name, dbFolder string) (string, error) {
-	name = filepath.Clean(name)
-	if filepath.Ext(name) == "" {
-		name += ".db"
-	}
-
-	dbf := filepath.Clean(dbFolder)
-	if strings.HasPrefix(name, dbf) {
-		name = strings.TrimPrefix(name, dbf)
-	}
-
-	dbFile := filepath.Join(dbf, name)
-	if _, err := os.Stat(dbFile); os.IsNotExist(err) {
-		return dbFile, fmt.Errorf("%w: %s", ErrDBFileNotFound, dbFile)
-	}
-
-	return dbFile, nil
+type CreateOptions struct {
+	driverName DriverName
+	dbFolder   string
+	source     embed.FS
+	srcFolder  string
 }
 
-func createSQLiteDBFile(name, dbFolder string) (dbFile string, err error) {
-	dbFile, err = DbFilePath(name, dbFolder)
-	if err != nil && !errors.Is(err, ErrDBFileNotFound) {
-		return "", err
-	}
-	if errors.Is(err, ErrDBFileNotFound) {
-		var dbFh *os.File
-		if dbFh, err = os.Create(dbFile); err != nil {
-			return "", fmt.Errorf("failed to create db file(%s): %w", dbFile, err)
+type CreateOptFn func(options *CreateOptions)
+
+func CreateDB(dsn string, opts ...CreateOptFn) (err error) {
+	option := CreateOptions{}
+	setCreateOptions(&option, opts...)
+
+	// keep original dsn for migration step
+	origDSN := dsn
+
+	if option.driverName == DriverSQLite {
+		dbFile, err := createSQLiteDBFile(dsn, option.dbFolder)
+		if err != nil {
+			return err
 		}
-		defer func() {
-			if dbFh != nil {
-				dbFh.Close()
-			}
-		}()
+
+		dsn = fmt.Sprintf("file:%s", dbFile)
 	}
 
-	return dbFile, nil
+	db, err := sql.Open(string(option.driverName), dsn)
+	if err != nil {
+		return err
+	}
+	if db != nil {
+		db.Close()
+	}
+
+	// Run migrations using the original DSN (not the file: DSN)
+	if err = MigrateDB(origDSN, opts...); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func CreateWithDriverName(dn DriverName) CreateOptFn {
+	return func(opt *CreateOptions) {
+		opt.driverName = dn
+	}
+}
+
+func CreateWithDbFolder(nme string) CreateOptFn {
+	return func(opt *CreateOptions) {
+		opt.dbFolder = filepath.Clean(nme)
+	}
+}
+
+func CreateWithSource(fs embed.FS) CreateOptFn {
+	return func(opt *CreateOptions) {
+		opt.source = fs
+	}
+}
+
+func CreateWithSrcFolder(n string) CreateOptFn {
+	return func(opt *CreateOptions) {
+		opt.srcFolder = n
+	}
+}
+
+func setCreateOptions(opt *CreateOptions, opts ...CreateOptFn) {
+	if len(opts) == 0 {
+		opts = []CreateOptFn{
+			CreateWithDriverName(DriverSQLite),
+		}
+	}
+	// Apply all options
+	for _, optFn := range opts {
+		optFn(opt)
+	}
+
+	if opt.dbFolder == "" && opt.driverName == DriverSQLite {
+		opt.dbFolder = "./data"
+	}
 }
