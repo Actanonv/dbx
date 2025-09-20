@@ -2,7 +2,6 @@ package db
 
 import (
 	"database/sql"
-	"embed"
 	"fmt"
 	"github.com/pressly/goose/v3"
 	_ "modernc.org/sqlite"
@@ -19,9 +18,10 @@ const (
 )
 
 // MigrateDB runs migrations on the db
-func MigrateDB(dsn string, driverName DriverName, srcFolder string, source embed.FS) (err error) {
-	if driverName == DriverSQLite {
-		dbFile, err := createSQLiteDBFile(dsn)
+func MigrateDB(opts CreateOptions) (err error) {
+	dsn := opts.DSN
+	if opts.DriverName == DriverSQLite {
+		dbFile, err := createSQLiteDBFile(opts.DSN, opts.DbFolder)
 		if err != nil {
 			return err
 		}
@@ -29,7 +29,7 @@ func MigrateDB(dsn string, driverName DriverName, srcFolder string, source embed
 		dsn = fmt.Sprintf("file:%s", dbFile)
 	}
 
-	db, err := sql.Open(string(driverName), dsn)
+	db, err := sql.Open(string(opts.DriverName), dsn)
 	if err != nil {
 		return err
 	}
@@ -39,7 +39,7 @@ func MigrateDB(dsn string, driverName DriverName, srcFolder string, source embed
 		return err
 	}
 
-	if driverName == DriverSQLite {
+	if opts.DriverName == DriverSQLite {
 		_, err = db.Exec("PRAGMA journal_mode=WAL;")
 		if err != nil {
 			return fmt.Errorf("failed to enable WAL mode: %w", err)
@@ -54,11 +54,11 @@ func MigrateDB(dsn string, driverName DriverName, srcFolder string, source embed
 	db.SetMaxIdleConns(1)
 	db.SetConnMaxLifetime(0)
 
-	goose.SetBaseFS(source)
-	if err := goose.SetDialect(string(driverName)); err != nil {
+	goose.SetBaseFS(opts.Source)
+	if err := goose.SetDialect(string(opts.DriverName)); err != nil {
 		return fmt.Errorf("failed to set dialect: %w", err)
 	}
-	if err := goose.Up(db, srcFolder); err != nil {
+	if err := goose.Up(db, opts.SrcFolder); err != nil {
 		return fmt.Errorf("failed to run migrations: %w", err)
 	}
 

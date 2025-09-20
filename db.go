@@ -15,9 +15,18 @@ var (
 	dbFolder string
 )
 
-func CreateDB(dsn string, driverName DriverName, srcFolder string, source embed.FS) (err error) {
-	if driverName == DriverSQLite {
-		dbFile, err := createSQLiteDBFile(dsn)
+type CreateOptions struct {
+	DSN        string
+	DriverName DriverName
+	DbFolder   string
+	Source     embed.FS
+	SrcFolder  string
+}
+
+func CreateDB(opts CreateOptions) (err error) {
+	dsn := opts.DSN
+	if opts.DriverName == DriverSQLite {
+		dbFile, err := createSQLiteDBFile(opts.DSN, "./data")
 		if err != nil {
 			return err
 		}
@@ -25,7 +34,7 @@ func CreateDB(dsn string, driverName DriverName, srcFolder string, source embed.
 		dsn = fmt.Sprintf("file:%s", dbFile)
 	}
 
-	db, err := sql.Open(string(driverName), dsn)
+	db, err := sql.Open(string(opts.DriverName), dsn)
 	if err != nil {
 		return err
 	}
@@ -33,7 +42,7 @@ func CreateDB(dsn string, driverName DriverName, srcFolder string, source embed.
 		db.Close()
 	}
 
-	if err = MigrateDB(dsn, driverName, srcFolder, source); err != nil {
+	if err = MigrateDB(opts); err != nil {
 		return err
 	}
 
@@ -42,9 +51,13 @@ func CreateDB(dsn string, driverName DriverName, srcFolder string, source embed.
 
 var ErrDBFileNotFound = errors.New("db file not found")
 
-// dbFilePath converts a name into a full path to the db including the file extension
-func dbFilePath(name string) (string, error) {
-	name = filepath.Clean(name + "db")
+// DbFilePath converts a name into a full path to the db including the file extension
+func DbFilePath(name, dbFolder string) (string, error) {
+	name = filepath.Clean(name)
+	if filepath.Ext(name) == "" {
+		name += ".db"
+	}
+
 	dbf := filepath.Clean(dbFolder)
 	if strings.HasPrefix(name, dbf) {
 		name = strings.TrimPrefix(name, dbf)
@@ -58,8 +71,8 @@ func dbFilePath(name string) (string, error) {
 	return dbFile, nil
 }
 
-func createSQLiteDBFile(name string) (dbFile string, err error) {
-	dbFile, err = dbFilePath(name)
+func createSQLiteDBFile(name, dbFolder string) (dbFile string, err error) {
+	dbFile, err = DbFilePath(name, dbFolder)
 	if err != nil && !errors.Is(err, ErrDBFileNotFound) {
 		return "", err
 	}

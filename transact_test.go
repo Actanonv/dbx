@@ -23,11 +23,11 @@ func setupTestDB(t *testing.T) *bun.DB {
 	dsn := filepath.Join(tmp, "testdb.sqlite")
 
 	// Ensure the file exists because OpenDB expects an existing SQLite file path
-	if _, err := createSQLiteDBFile(dsn); err != nil {
+	if _, err := createSQLiteDBFile(dsn, dbFolder); err != nil {
 		t.Fatalf("createSQLiteDBFile failed: %v", err)
 	}
 
-	db, err := OpenDB(dsn)
+	db, err := OpenDB(dsn, WithDbFolder(dbFolder), WithDriverName(DriverSQLite))
 	if err != nil {
 		t.Fatalf("OpenDB failed: %v", err)
 	}

@@ -3,6 +3,7 @@ package db
 import (
 	"database/sql"
 	"fmt"
+	"path/filepath"
 	"time"
 
 	"github.com/uptrace/bun"
@@ -12,6 +13,7 @@ import (
 
 type Options struct {
 	driverName      string
+	dbFolder        string
 	maxOpenConns    int
 	maxIdleConns    int
 	connMaxLifetime time.Duration
@@ -23,6 +25,13 @@ func WithDriverName(dn DriverName) OpenOptFn {
 		opt.driverName = string(dn)
 	}
 }
+
+func WithDbFolder(nme string) OpenOptFn {
+	return func(opt *Options) {
+		opt.dbFolder = filepath.Clean(nme)
+	}
+}
+
 func WithMaxOpenConns(n int) OpenOptFn {
 	return func(opt *Options) {
 		opt.maxOpenConns = n
@@ -41,13 +50,15 @@ func WithConnMaxLifetime(d time.Duration) OpenOptFn {
 	}
 }
 
+// OpenDB opens a new database connection.
+// for sqlite, dsn should be a file name (without extension)
 func OpenDB(dsn string, opts ...OpenOptFn) (*bun.DB, error) {
 	var opt Options
 	setOptions(&opt, opts...)
 	driver := DriverName(opt.driverName)
 
 	if driver == DriverSQLite {
-		dbFile, err := dbFilePath(dsn)
+		dbFile, err := DbFilePath(dsn, opt.dbFolder)
 		if err != nil {
 			return nil, err
 		}
@@ -100,5 +111,9 @@ func setOptions(opt *Options, opts ...OpenOptFn) {
 	// Apply all options
 	for _, optFn := range opts {
 		optFn(opt)
+	}
+
+	if opt.dbFolder == "" && opt.driverName == string(DriverSQLite) {
+		opt.dbFolder = "./data"
 	}
 }
