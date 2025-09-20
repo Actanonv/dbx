@@ -1,4 +1,4 @@
-package db
+package dbx
 
 import (
 	"context"
@@ -48,10 +48,7 @@ func setupTestDB(t *testing.T) *bun.DB {
 
 func mustNewTx(t *testing.T, db *bun.DB) *Transact {
 	t.Helper()
-	tx, err := NewTransact(db)
-	if err != nil {
-		t.Fatalf("NewTransact error: %v", err)
-	}
+	tx := NewTransact(db)
 	return tx
 }
 

@@ -1,4 +1,4 @@
-package db
+package dbx
 
 import (
 	"context"
@@ -25,11 +25,11 @@ type Transact struct {
 	nested int
 }
 
-func NewTransact(db *bun.DB) (tx *Transact, err error) {
+func NewTransact(db *bun.DB) (tx *Transact) {
 	tx = new(Transact)
 	tx.db = db
 
-	return tx, nil
+	return tx
 }
 
 func (t *Transact) Db() (db bun.IDB) {
