@@ -10,8 +10,6 @@ import (
 	"sync"
 )
 
-var dbCache Cache
-
 type ListOptions struct {
 	Where string
 	Args  []any
@@ -27,17 +25,7 @@ type Transact struct {
 	nested int
 }
 
-func NewTransactFor(dbName string) (tx *Transact, err error) {
-	tx = new(Transact)
-	tx.db, err = dbCache.Get(dbName)
-	if err != nil {
-		return nil, err
-	}
-
-	return tx, nil
-}
-
-func NewTransactWithDb(db *bun.DB) (tx *Transact, err error) {
+func NewTransact(db *bun.DB) (tx *Transact, err error) {
 	tx = new(Transact)
 	tx.db = db
 

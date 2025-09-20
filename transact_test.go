@@ -48,9 +48,9 @@ func setupTestDB(t *testing.T) *bun.DB {
 
 func mustNewTx(t *testing.T, db *bun.DB) *Transact {
 	t.Helper()
-	tx, err := NewTransactWithDb(db)
+	tx, err := NewTransact(db)
 	if err != nil {
-		t.Fatalf("NewTransactWithDb error: %v", err)
+		t.Fatalf("NewTransact error: %v", err)
 	}
 	return tx
 }
