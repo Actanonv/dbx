@@ -73,17 +73,16 @@ func CreateWithSrcFolder(n string) CreateOptFn {
 }
 
 func setCreateOptions(opt *CreateOptions, opts ...CreateOptFn) {
-	if len(opts) == 0 {
-		opts = []CreateOptFn{
-			CreateWithDriverName(DriverSQLite),
-		}
-	}
+
 	// Apply all options
 	for _, optFn := range opts {
 		optFn(opt)
 	}
 
+	if opt.driverName == "" {
+		CreateWithDriverName(DriverSQLite)(opt)
+	}
 	if opt.dbFolder == "" && opt.driverName == DriverSQLite {
-		opt.dbFolder = "./data"
+		CreateWithDbFolder("./data")(opt)
 	}
 }

@@ -100,24 +100,24 @@ func OpenDB(dsn string, opts ...OpenOptFn) (*bun.DB, error) {
 }
 
 func setOptions(opt *Options, opts ...OpenOptFn) {
-	if len(opts) == 0 {
-		opts = []OpenOptFn{
-			WithDriverName(DriverSQLite),
-		}
-	}
+
 	// Apply all options
 	for _, optFn := range opts {
 		optFn(opt)
 	}
 
+	if opt.driverName == "" {
+		WithDriverName(DriverSQLite)(opt)
+	}
+
 	if opt.maxIdleConns == 0 {
-		opt.maxIdleConns = 1
+		WithMaxIdleConns(1)(opt)
 	}
 	if opt.maxOpenConns == 0 {
-		opt.maxOpenConns = 1
+		WithMaxOpenConns(1)(opt)
 	}
 
 	if opt.dbFolder == "" && opt.driverName == string(DriverSQLite) {
-		opt.dbFolder = "./data"
+		WithDbFolder("./data")(opt)
 	}
 }
