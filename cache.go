@@ -51,7 +51,7 @@ func (c *Cache) Get(name string) (db *bun.DB, err error) {
 	return db, nil
 }
 
-func (c *Cache) GetOrOpen(name string) (db *bun.DB, err error) {
+func (c *Cache) GetOrOpen(name string, openOptions ...OpenOptFn) (db *bun.DB, err error) {
 	c.mu.Lock()
 	defer func() {
 		if err == nil {
@@ -65,7 +65,7 @@ func (c *Cache) GetOrOpen(name string) (db *bun.DB, err error) {
 		return db, nil
 	}
 
-	if db, err = OpenDB(name); err != nil {
+	if db, err = OpenDB(name, openOptions...); err != nil {
 		return nil, err
 	}
 
