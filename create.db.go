@@ -10,7 +10,7 @@ import (
 type CreateOptions struct {
 	driverName DriverName
 	dbFolder   string
-	source     embed.FS
+	source     *embed.FS
 	srcFolder  string
 }
 
@@ -50,9 +50,11 @@ func CreateDB(dsn string, opts ...CreateOptFn) (err error) {
 		db.Close()
 	}
 
-	// Run migrations using the original DSN (not the file: DSN)
-	if err = MigrateDB(origDSN, opts...); err != nil {
-		return err
+	if option.source != nil {
+		// Run migrations using the original DSN (not the file: DSN)
+		if err = MigrateDB(origDSN, opts...); err != nil {
+			return err
+		}
 	}
 
 	return nil
@@ -72,7 +74,7 @@ func CreateWithDbFolder(nme string) CreateOptFn {
 
 func CreateWithSource(fs embed.FS) CreateOptFn {
 	return func(opt *CreateOptions) {
-		opt.source = fs
+		opt.source = &fs
 	}
 }
 

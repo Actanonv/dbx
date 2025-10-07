@@ -172,3 +172,72 @@ func TestCreateDB_CreatesFileAndRunsMigrations(t *testing.T) {
 		t.Fatalf("insert after CreateDB failed: %v", err)
 	}
 }
+func TestTableExists(t *testing.T) {
+	tmp := t.TempDir()
+	name := "tableexiststest"
+
+	// Create DB
+	if err := CreateDB(name, CreateWithDriverName(DriverSQLite), CreateWithDbFolder(tmp)); err != nil {
+		t.Fatalf("CreateDB failed: %v", err)
+	}
+
+	// Open the DB
+	db, err := OpenDB(filepath.Join(tmp, name), WithDbFolder(tmp), WithDriverName(DriverSQLite))
+	if err != nil {
+		t.Fatalf("OpenDB failed: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	ctx := context.Background()
+
+	// Create a test table
+	_, err = db.ExecContext(ctx, "CREATE TABLE test_table (id INTEGER PRIMARY KEY, name TEXT)")
+	if err != nil {
+		t.Fatalf("Failed to create test table: %v", err)
+	}
+
+	tests := []struct {
+		name      string
+		tableName string
+		want      bool
+		wantErr   bool
+	}{
+		{
+			name:      "existing table",
+			tableName: "test_table",
+			want:      true,
+			wantErr:   false,
+		},
+		{
+			name:      "nonexistent table",
+			tableName: "nonexistent_table",
+			want:      false,
+			wantErr:   false,
+		},
+		{
+			name:      "table with quotes",
+			tableName: "\"test_table\"",
+			want:      true,
+			wantErr:   false,
+		},
+		{
+			name:      "table with single quotes",
+			tableName: "'test_table'",
+			want:      true,
+			wantErr:   false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := TableExists(ctx, db, tt.tableName)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("TableExists() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if got != tt.want {
+				t.Errorf("TableExists() got = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}

@@ -58,11 +58,11 @@ func TableExists(ctx context.Context, db *bun.DB, tableName string) (bool, error
 	// Normalize table name (strip quotes/backticks if any)
 	tableName = strings.Trim(tableName, `"'`)
 
-	// Get current dialect
-	dialect := db.Dialect().Name()
+	// Get current dName
+	dName := db.Dialect().Name()
 
 	var query string
-	switch DriverName(dialect) {
+	switch DriverName(dName.String()) {
 	case DriverSQLite:
 		query = `SELECT name FROM sqlite_master WHERE type='table' AND name = ?`
 	case DriverPostgres, DriverPgx:
@@ -70,7 +70,7 @@ func TableExists(ctx context.Context, db *bun.DB, tableName string) (bool, error
 	case DriverMySQL:
 		query = `SELECT table_name FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = ?`
 	default:
-		return false, fmt.Errorf("unsupported dialect: %s", dialect)
+		return false, fmt.Errorf("unsupported dialect: %s", dName)
 	}
 
 	var result string
