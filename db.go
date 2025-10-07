@@ -1,11 +1,14 @@
 package dbx
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/uptrace/bun"
 )
 
 var ErrDBFileNotFound = errors.New("db file not found")
@@ -48,4 +51,37 @@ func createSQLiteDBFile(name, dbFolder string) (dbFile string, err error) {
 	}
 
 	return dbFile, nil
+}
+
+// TableExists checks if a table exists in the database
+func TableExists(ctx context.Context, db *bun.DB, tableName string) (bool, error) {
+	// Normalize table name (strip quotes/backticks if any)
+	tableName = strings.Trim(tableName, `"'`)
+
+	// Get current dialect
+	dialect := db.Dialect().Name()
+
+	var query string
+	switch DriverName(dialect) {
+	case DriverSQLite:
+		query = `SELECT name FROM sqlite_master WHERE type='table' AND name = ?`
+	case DriverPostgres, DriverPgx:
+		query = `SELECT to_regclass(?)`
+	case DriverMySQL:
+		query = `SELECT table_name FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = ?`
+	default:
+		return false, fmt.Errorf("unsupported dialect: %s", dialect)
+	}
+
+	var result string
+	err := db.NewRaw(query, tableName).Scan(ctx, &result)
+	if err != nil {
+		// Bun returns sql.ErrNoRows if not found — treat as "does not exist"
+		if err.Error() == "sql: no rows in result set" {
+			return false, nil
+		}
+		return false, err
+	}
+
+	return result != "", nil
 }
