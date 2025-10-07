@@ -16,6 +16,16 @@ type CreateOptions struct {
 
 type CreateOptFn func(options *CreateOptions)
 
+// CreateDB creates a new database specified by the dsn and runs migrations.
+// Provides the following options:
+//
+//   - CreateWithDriverName(driverName DriverName) - specify the database driver (default: DriverSQLite)
+//   - CreateWithDbFolder(folder string) - specify the folder to create the SQLite database file in (default: "./data")
+//   - CreateWithSource(fs embed.FS) - specify the embedded filesystem containing migration files
+//   - CreateWithSrcFolder(folder string) - specify the folder within the embedded filesystem containing migration files
+//
+// For SQLite, if the database file already exists, it will not be overwritten.
+// For other databases, ensure that the user has the necessary permissions to create a new database.
 func CreateDB(dsn string, opts ...CreateOptFn) (err error) {
 	option := CreateOptions{}
 	setCreateOptions(&option, opts...)
