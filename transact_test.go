@@ -52,7 +52,10 @@ func setupTestDB(t *testing.T) *bun.DB {
 
 func mustNewTx(t *testing.T, db *bun.DB) *Transact {
 	t.Helper()
-	tx := NewTransact(db)
+	tx, err := NewTransact(db)
+	if err != nil {
+		t.Fatalf("NewTransact failed: %v", err)
+	}
 	return tx
 }
 
@@ -248,6 +251,36 @@ func TestTransactionHelperPanicRollsBackAndRepanics(t *testing.T) {
 		insertItem(t, tx.Db(), "x")
 		panic("kaboom")
 	})
+}
+
+func TestTransactionDoubleRollbackSafety(t *testing.T) {
+	db := setupTestDB(t)
+	tx := mustNewTx(t, db)
+
+	// We want to test that if Commit fails, we don't double-decrement or double-pop.
+	// This is hard to trigger with real SQLite without a specialized driver,
+	// but we can at least verify the state manually if we had access.
+	// Since we can't easily mock bun.Tx, we'll verify it doesn't panic on a manual sequence.
+
+	ctx := context.Background()
+	_ = tx.Transaction(ctx, nil, func(ctx context.Context) error {
+		// Outer
+		return tx.Transaction(ctx, nil, func(ctx context.Context) error {
+			// Inner
+			return nil
+		})
+	})
+
+	if tx.nested != 0 {
+		t.Fatalf("expected nested to be 0, got %d", tx.nested)
+	}
+}
+
+func TestNewTransactError(t *testing.T) {
+	_, err := NewTransact(nil)
+	if err == nil {
+		t.Errorf("expected error for nil db in NewTransact, got nil")
+	}
 }
 
 // Ensure no tx active produces expected errors on Commit/Rollback

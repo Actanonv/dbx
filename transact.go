@@ -25,11 +25,14 @@ type Transact struct {
 	nested int
 }
 
-func NewTransact(db *bun.DB) (tx *Transact) {
+func NewTransact(db *bun.DB) (tx *Transact, err error) {
+	if db == nil {
+		return nil, errors.New("dbx: NewTransact with nil db")
+	}
 	tx = new(Transact)
 	tx.db = db
 
-	return tx
+	return tx, nil
 }
 
 func (t *Transact) Db() (db bun.IDB) {
@@ -84,16 +87,7 @@ func (t *Transact) Commit() error {
 		if err := t.tx.Commit(); err != nil {
 			return err
 		}
-		// Pop parent from stack.
-		parentIdx := len(t.stack) - 1
-		if parentIdx >= 0 {
-			t.tx = t.stack[parentIdx]
-			t.stack = t.stack[:parentIdx]
-		} else {
-			// Should not happen, but safeguard.
-			t.tx = nil
-		}
-		t.nested--
+		t.popTx()
 		return nil
 	}
 
@@ -104,7 +98,7 @@ func (t *Transact) Commit() error {
 
 	t.tx = nil
 	t.stack = nil
-	t.nested--
+	t.nested = 0
 	return nil
 }
 
@@ -116,28 +110,34 @@ func (t *Transact) Rollback() error {
 	}
 
 	if t.nested > 1 {
-		// Rollback to current savepoint and revert to parent tx.
+		// Rollback to the current savepoint and revert to parent tx.
 		if err := t.tx.Rollback(); err != nil {
 			return err
 		}
-		parentIdx := len(t.stack) - 1
-		if parentIdx >= 0 {
-			t.tx = t.stack[parentIdx]
-			t.stack = t.stack[:parentIdx]
-		} else {
-			// Should not happen, but safeguard.
-			t.tx = nil
-		}
-		t.nested--
+		t.popTx()
 		return nil
 	}
 
 	// Outermost transaction rollback.
-	t.nested--
 	err := t.tx.Rollback()
 	t.tx = nil
 	t.stack = nil
+	t.nested = 0
 	return err
+}
+
+func (t *Transact) popTx() {
+	// Pop parent from the stack.
+	parentIdx := len(t.stack) - 1
+	if parentIdx >= 0 {
+		t.tx = t.stack[parentIdx]
+		t.stack[parentIdx] = nil // Avoid memory leak
+		t.stack = t.stack[:parentIdx]
+	} else {
+		// Should not happen, but safeguard.
+		t.tx = nil
+	}
+	t.nested--
 }
 
 type TransactFunc func(ctx context.Context) error
@@ -148,13 +148,23 @@ func (t *Transact) Transaction(ctx context.Context, opt *sql.TxOptions, fn Trans
 		return err
 	}
 
-	var done bool
+	var committed bool
 
 	defer func() {
 		r := recover()
-		if !done || r != nil {
-			if rErr := t.Rollback(); rErr != nil {
-				err = errors.Join(err, fmt.Errorf("rollback failed: %w", rErr))
+		if !committed || r != nil {
+			rErr := t.Rollback()
+			if rErr != nil {
+				// If we are already in error or panic, join the rollback error.
+				if err != nil {
+					err = errors.Join(err, fmt.Errorf("rollback failed: %w", rErr))
+				} else if r != nil {
+					// If we only have a panic, we might want to log or just ignore rollback error
+					// but joining it with nil error doesn't work well if we don't have an error variable.
+					// We'll set err so it can be potentially used if we were to return it,
+					// but since we re-panic, it's mostly for visibility if someone captures it.
+					err = fmt.Errorf("rollback failed during panic: %w", rErr)
+				}
 			}
 		}
 		if r != nil {
@@ -163,15 +173,15 @@ func (t *Transact) Transaction(ctx context.Context, opt *sql.TxOptions, fn Trans
 	}()
 
 	if fErr := fn(ctx); fErr != nil {
-		return fErr
+		err = fErr
+		return err
 	}
 
-	done = true
 	if cErr := t.Commit(); cErr != nil {
-		done = false
 		err = fmt.Errorf("failed to commit: %w", cErr)
 		return err
 	}
 
+	committed = true
 	return nil
 }
