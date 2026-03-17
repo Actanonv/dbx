@@ -62,7 +62,7 @@ func OpenDB(dsn string, opts ...OpenOptFn) (*bun.DB, error) {
 			return nil, err
 		}
 
-		if driver == DriverSQLiteMattn {
+		if driver == DriverSQLite {
 			dsn = "file:" + dbFile +
 				"?_journal_mode=WAL" +
 				"&_synchronous=NORMAL" +
@@ -95,7 +95,7 @@ func OpenDB(dsn string, opts ...OpenOptFn) (*bun.DB, error) {
 		return nil, err
 	}
 
-	if IsSQLite(driver) && driver == DriverSQLiteMattn {
+	if IsSQLite(driver) && driver == DriverSQLite {
 		if _, err = db.Exec(`PRAGMA temp_store = MEMORY;`); err != nil {
 			db.Close()
 			return nil, fmt.Errorf("failed to enable WAL mode: %w", err)

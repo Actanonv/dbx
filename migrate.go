@@ -9,16 +9,16 @@ import (
 type DriverName string
 
 const (
-	DriverSQLite      DriverName = "sqlite"
-	DriverSQLiteMattn DriverName = "sqlite3"
-	DriverPostgres    DriverName = "postgres"
-	DriverPgx         DriverName = "pgx"
-	DriverMySQL       DriverName = "mysql"
-	DriverMSSQL       DriverName = "mssql"
+	DriverSQLiteMc DriverName = "sqlite"
+	DriverSQLite   DriverName = "sqlite3"
+	DriverPostgres DriverName = "postgres"
+	DriverPgx      DriverName = "pgx"
+	DriverMySQL    DriverName = "mysql"
+	DriverMSSQL    DriverName = "mssql"
 )
 
 func IsSQLite(dn DriverName) bool {
-	return dn == DriverSQLite || dn == DriverSQLiteMattn
+	return dn == DriverSQLiteMc || dn == DriverSQLite
 }
 
 // MigrateDB runs migrations on the db

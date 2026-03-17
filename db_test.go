@@ -60,7 +60,7 @@ func TestOpenDB_SQLitePragmas(t *testing.T) {
 		t.Fatalf("createSQLiteDBFile failed: %v", err)
 	}
 
-	db, err := OpenDB(dsn, WithDbFolder(tmp), WithDriverName(DriverSQLite))
+	db, err := OpenDB(dsn, WithDbFolder(tmp), WithDriverName(DriverSQLiteMc))
 	if err != nil {
 		t.Fatalf("OpenDB failed: %v", err)
 	}
@@ -92,7 +92,7 @@ func TestMigrateDB_RunsMigrations(t *testing.T) {
 
 	// Run migrations using embedded SQL files
 	if err := MigrateDB(name,
-		CreateWithDriverName(DriverSQLite),
+		CreateWithDriverName(DriverSQLiteMc),
 		CreateWithDbFolder(tmp),
 		CreateWithSource(testMigrations),
 		CreateWithSrcFolder("testmigrations"),
@@ -101,7 +101,7 @@ func TestMigrateDB_RunsMigrations(t *testing.T) {
 	}
 
 	// Open the DB and verify the table exists and is usable
-	db, err := OpenDB(filepath.Join(tmp, name), WithDbFolder(tmp), WithDriverName(DriverSQLite))
+	db, err := OpenDB(filepath.Join(tmp, name), WithDbFolder(tmp), WithDriverName(DriverSQLiteMc))
 	if err != nil {
 		t.Fatalf("OpenDB after migration failed: %v", err)
 	}
@@ -133,7 +133,7 @@ func TestCreateDB_CreatesFileAndRunsMigrations(t *testing.T) {
 
 	// Create DB which should also run migrations
 	if err := CreateDB(name,
-		CreateWithDriverName(DriverSQLite),
+		CreateWithDriverName(DriverSQLiteMc),
 		CreateWithDbFolder(tmp),
 		CreateWithSource(testMigrations),
 		CreateWithSrcFolder("testmigrations"),
@@ -151,7 +151,7 @@ func TestCreateDB_CreatesFileAndRunsMigrations(t *testing.T) {
 	}
 
 	// Open and verify migration effects
-	db, err := OpenDB(filepath.Join(tmp, name), WithDbFolder(tmp), WithDriverName(DriverSQLite))
+	db, err := OpenDB(filepath.Join(tmp, name), WithDbFolder(tmp), WithDriverName(DriverSQLiteMc))
 	if err != nil {
 		t.Fatalf("OpenDB after CreateDB failed: %v", err)
 	}
@@ -190,12 +190,12 @@ func TestTableExists(t *testing.T) {
 	ctx := context.Background()
 
 	// Create DB
-	if err := CreateDB(name, CreateWithDriverName(DriverSQLite), CreateWithDbFolder(tmp)); err != nil {
+	if err := CreateDB(name, CreateWithDriverName(DriverSQLiteMc), CreateWithDbFolder(tmp)); err != nil {
 		t.Fatalf("CreateDB failed: %v", err)
 	}
 
 	// Verify the table can be created and WAL mode is set
-	dbCheck, err := OpenDB(filepath.Join(tmp, name), WithDbFolder(tmp), WithDriverName(DriverSQLite))
+	dbCheck, err := OpenDB(filepath.Join(tmp, name), WithDbFolder(tmp), WithDriverName(DriverSQLiteMc))
 	if err != nil {
 		t.Fatalf("OpenDB failed: %v", err)
 	}
@@ -209,7 +209,7 @@ func TestTableExists(t *testing.T) {
 	dbCheck.Close()
 
 	// Open the DB
-	db, err := OpenDB(filepath.Join(tmp, name), WithDbFolder(tmp), WithDriverName(DriverSQLite))
+	db, err := OpenDB(filepath.Join(tmp, name), WithDbFolder(tmp), WithDriverName(DriverSQLiteMc))
 	if err != nil {
 		t.Fatalf("OpenDB failed: %v", err)
 	}

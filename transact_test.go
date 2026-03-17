@@ -31,7 +31,7 @@ func setupTestDB(t *testing.T) *bun.DB {
 		t.Fatalf("createSQLiteDBFile failed: %v", err)
 	}
 
-	db, err := OpenDB(dsn, WithDbFolder(dbFolder), WithDriverName(DriverSQLite))
+	db, err := OpenDB(dsn, WithDbFolder(dbFolder), WithDriverName(DriverSQLiteMc))
 	if err != nil {
 		t.Fatalf("OpenDB failed: %v", err)
 	}
