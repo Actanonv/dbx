@@ -26,38 +26,48 @@ type CreateOptFn func(options *CreateOptions)
 //
 // For SQLite, if the database file already exists, it will not be overwritten.
 // For other databases, ensure that the user has the necessary permissions to create a new database.
-func CreateDB(dsn string, opts ...CreateOptFn) (err error) {
+func CreateDB(dsn string, opts ...CreateOptFn) error {
 	option := CreateOptions{}
 	setCreateOptions(&option, opts...)
 
-	// keep original dsn for migration step
-	origDSN := dsn
+	// If no source is provided, we just want to ensure the database can be opened (and file created for SQLite)
+	if option.source == nil {
+		if IsSQLite(option.driverName) {
+			dbFile, err := createSQLiteDBFile(dsn, option.dbFolder)
+			if err != nil {
+				return err
+			}
+			dsn = fmt.Sprintf("file:%s", dbFile)
+		}
 
-	if option.driverName == DriverSQLite {
-		dbFile, err := createSQLiteDBFile(dsn, option.dbFolder)
+		db, err := sql.Open(string(option.driverName), dsn)
 		if err != nil {
 			return err
 		}
+		defer db.Close()
 
-		dsn = fmt.Sprintf("file:%s", dbFile)
-	}
-
-	db, err := sql.Open(string(option.driverName), dsn)
-	if err != nil {
-		return err
-	}
-	if db != nil {
-		db.Close()
-	}
-
-	if option.source != nil {
-		// Run migrations using the original DSN (not the file: DSN)
-		if err = MigrateDB(origDSN, opts...); err != nil {
+		if err := db.Ping(); err != nil {
 			return err
 		}
+
+		if IsSQLite(option.driverName) {
+			if _, err := db.Exec(`
+				PRAGMA journal_mode = WAL;
+				PRAGMA synchronous = NORMAL;
+				PRAGMA busy_timeout = 5000;
+				PRAGMA foreign_keys = ON;
+				PRAGMA cache_size = -65536;
+				PRAGMA temp_store = MEMORY;
+			`); err != nil {
+				return fmt.Errorf("failed to configure sqlite: %w", err)
+			}
+		}
+
+		return nil
 	}
 
-	return nil
+	// Run migrations (that also includes opening/pinging the DB)
+	return MigrateDB(dsn, opts...)
 }
 
 func CreateWithDriverName(dn DriverName) CreateOptFn {
@@ -94,7 +104,7 @@ func setCreateOptions(opt *CreateOptions, opts ...CreateOptFn) {
 	if opt.driverName == "" {
 		CreateWithDriverName(DriverSQLite)(opt)
 	}
-	if opt.dbFolder == "" && opt.driverName == DriverSQLite {
+	if opt.dbFolder == "" && IsSQLite(opt.driverName) {
 		CreateWithDbFolder("./data")(opt)
 	}
 }

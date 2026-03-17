@@ -4,25 +4,29 @@ import (
 	"database/sql"
 	"fmt"
 	"github.com/pressly/goose/v3"
-	_ "modernc.org/sqlite"
 )
 
 type DriverName string
 
 const (
-	DriverSQLite   DriverName = "sqlite"
-	DriverPostgres DriverName = "postgres"
-	DriverPgx      DriverName = "pgx"
-	DriverMySQL    DriverName = "mysql"
-	DriverMSSQL    DriverName = "mssql"
+	DriverSQLite      DriverName = "sqlite"
+	DriverSQLiteMattn DriverName = "sqlite3"
+	DriverPostgres    DriverName = "postgres"
+	DriverPgx         DriverName = "pgx"
+	DriverMySQL       DriverName = "mysql"
+	DriverMSSQL       DriverName = "mssql"
 )
+
+func IsSQLite(dn DriverName) bool {
+	return dn == DriverSQLite || dn == DriverSQLiteMattn
+}
 
 // MigrateDB runs migrations on the db
 func MigrateDB(dsn string, opts ...CreateOptFn) (err error) {
 	option := CreateOptions{}
 	setCreateOptions(&option, opts...)
 
-	if option.driverName == DriverSQLite {
+	if IsSQLite(option.driverName) {
 		dbFile, err := createSQLiteDBFile(dsn, option.dbFolder)
 		if err != nil {
 			return err
@@ -41,14 +45,16 @@ func MigrateDB(dsn string, opts ...CreateOptFn) (err error) {
 		return err
 	}
 
-	if option.driverName == DriverSQLite {
-		_, err = db.Exec("PRAGMA journal_mode=WAL;")
-		if err != nil {
-			return fmt.Errorf("failed to enable WAL mode: %w", err)
-		}
-
-		if _, err = db.Exec("PRAGMA foreign_keys = ON;"); err != nil {
-			return fmt.Errorf("failed to enable foreign keys mode: %w", err)
+	if IsSQLite(option.driverName) {
+		if _, err = db.Exec(`
+			PRAGMA journal_mode = WAL;
+			PRAGMA synchronous = NORMAL;
+			PRAGMA busy_timeout = 5000;
+			PRAGMA foreign_keys = ON;
+			PRAGMA cache_size = -65536;
+			PRAGMA temp_store = MEMORY;
+		`); err != nil {
+			return fmt.Errorf("failed to configure sqlite: %w", err)
 		}
 	}
 

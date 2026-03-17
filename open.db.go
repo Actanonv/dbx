@@ -56,14 +56,29 @@ func OpenDB(dsn string, opts ...OpenOptFn) (*bun.DB, error) {
 	var opt Options
 	setOptions(&opt, opts...)
 	driver := DriverName(opt.driverName)
-
-	if driver == DriverSQLite {
+	if IsSQLite(driver) {
 		dbFile, err := DbFilePath(dsn, opt.dbFolder)
 		if err != nil {
 			return nil, err
 		}
 
-		dsn = fmt.Sprintf("file:%s?_journal=WAL&mode=rwc&busy=2000&_foreign_keys=1", dbFile)
+		if driver == DriverSQLiteMattn {
+			dsn = "file:" + dbFile +
+				"?_journal_mode=WAL" +
+				"&_synchronous=NORMAL" +
+				"&_busy_timeout=5000" +
+				"&_foreign_keys=on" +
+				"&_cache_size=-65536" +
+				"&cache=private"
+		} else {
+			dsn = "file:" + dbFile +
+				"?_pragma=journal_mode(WAL)" +
+				"&_pragma=synchronous(NORMAL)" +
+				"&_pragma=busy_timeout(5000)" +
+				"&_pragma=foreign_keys(ON)" +
+				"&_pragma=cache_size(-65536)" +
+				"&_pragma=temp_store(MEMORY)"
+		}
 	}
 
 	db, err := sql.Open(opt.driverName, dsn)
@@ -71,24 +86,21 @@ func OpenDB(dsn string, opts ...OpenOptFn) (*bun.DB, error) {
 		return nil, err
 	}
 
-	if err := db.Ping(); err != nil {
-		return nil, err
-	}
-
-	if driver == DriverSQLite {
-		_, err = db.Exec("PRAGMA journal_mode=WAL;")
-		if err != nil {
-			return nil, fmt.Errorf("failed to enable WAL mode: %w", err)
-		}
-
-		if _, err = db.Exec("PRAGMA foreign_keys = ON;"); err != nil {
-			return nil, fmt.Errorf("failed to enable foreign keys mode: %w", err)
-		}
-	}
-
 	db.SetMaxOpenConns(opt.maxOpenConns)
 	db.SetMaxIdleConns(opt.maxIdleConns)
 	db.SetConnMaxLifetime(opt.connMaxLifetime)
+
+	if err := db.Ping(); err != nil {
+		db.Close()
+		return nil, err
+	}
+
+	if IsSQLite(driver) && driver == DriverSQLiteMattn {
+		if _, err = db.Exec(`PRAGMA temp_store = MEMORY;`); err != nil {
+			db.Close()
+			return nil, fmt.Errorf("failed to enable WAL mode: %w", err)
+		}
+	}
 
 	bunDB := bun.NewDB(db, sqlitedialect.New(), bun.WithDiscardUnknownColumns())
 	bunDB.AddQueryHook(bundebug.NewQueryHook(
@@ -111,13 +123,21 @@ func setOptions(opt *Options, opts ...OpenOptFn) {
 	}
 
 	if opt.maxIdleConns == 0 {
-		WithMaxIdleConns(1)(opt)
+		if IsSQLite(DriverName(opt.driverName)) {
+			WithMaxIdleConns(1)(opt)
+		} else {
+			WithMaxIdleConns(2)(opt)
+		}
 	}
 	if opt.maxOpenConns == 0 {
-		WithMaxOpenConns(1)(opt)
+		if IsSQLite(DriverName(opt.driverName)) {
+			WithMaxOpenConns(1)(opt)
+		} else {
+			WithMaxOpenConns(10)(opt)
+		}
 	}
 
-	if opt.dbFolder == "" && opt.driverName == string(DriverSQLite) {
+	if opt.dbFolder == "" && IsSQLite(DriverName(opt.driverName)) {
 		WithDbFolder("./data")(opt)
 	}
 }

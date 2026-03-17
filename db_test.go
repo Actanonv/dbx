@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	_ "modernc.org/sqlite"
 )
 
 //go:embed testmigrations/*.sql
@@ -168,6 +170,15 @@ func TestCreateDB_CreatesFileAndRunsMigrations(t *testing.T) {
 		t.Fatalf("expected table name 'items', got %q", tbl)
 	}
 
+	// Verify WAL mode
+	var mode string
+	if err := db.QueryRowContext(ctx, "PRAGMA journal_mode;").Scan(&mode); err != nil {
+		t.Fatalf("query PRAGMA journal_mode failed: %v", err)
+	}
+	if mode != "wal" {
+		t.Fatalf("expected journal_mode=wal, got %q", mode)
+	}
+
 	if _, err := db.ExecContext(ctx, "INSERT INTO items(name) VALUES (?)", "bar"); err != nil {
 		t.Fatalf("insert after CreateDB failed: %v", err)
 	}
@@ -176,10 +187,26 @@ func TestTableExists(t *testing.T) {
 	tmp := t.TempDir()
 	name := "tableexiststest"
 
+	ctx := context.Background()
+
 	// Create DB
 	if err := CreateDB(name, CreateWithDriverName(DriverSQLite), CreateWithDbFolder(tmp)); err != nil {
 		t.Fatalf("CreateDB failed: %v", err)
 	}
+
+	// Verify the table can be created and WAL mode is set
+	dbCheck, err := OpenDB(filepath.Join(tmp, name), WithDbFolder(tmp), WithDriverName(DriverSQLite))
+	if err != nil {
+		t.Fatalf("OpenDB failed: %v", err)
+	}
+	var modeCheck string
+	if err := dbCheck.QueryRowContext(ctx, "PRAGMA journal_mode;").Scan(&modeCheck); err != nil {
+		t.Fatalf("query PRAGMA journal_mode failed: %v", err)
+	}
+	if modeCheck != "wal" {
+		t.Fatalf("expected journal_mode=wal, got %q", modeCheck)
+	}
+	dbCheck.Close()
 
 	// Open the DB
 	db, err := OpenDB(filepath.Join(tmp, name), WithDbFolder(tmp), WithDriverName(DriverSQLite))
@@ -187,8 +214,6 @@ func TestTableExists(t *testing.T) {
 		t.Fatalf("OpenDB failed: %v", err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
-
-	ctx := context.Background()
 
 	// Create a test table
 	_, err = db.ExecContext(ctx, "CREATE TABLE test_table (id INTEGER PRIMARY KEY, name TEXT)")

@@ -30,7 +30,7 @@ func DbFilePath(name, dbFolder string) (string, error) {
 		return dbFile, fmt.Errorf("%w: %s", ErrDBFileNotFound, dbFile)
 	}
 
-	return dbFile, nil
+	return filepath.Abs(dbFile)
 }
 
 func createSQLiteDBFile(name, dbFolder string) (dbFile string, err error) {
@@ -62,12 +62,12 @@ func TableExists(ctx context.Context, db *bun.DB, tableName string) (bool, error
 	dName := db.Dialect().Name()
 
 	var query string
-	switch DriverName(dName.String()) {
-	case DriverSQLite:
+	switch dName := DriverName(dName.String()); {
+	case IsSQLite(dName):
 		query = `SELECT name FROM sqlite_master WHERE type='table' AND name = ?`
-	case DriverPostgres, DriverPgx:
+	case dName == DriverPostgres || dName == DriverPgx:
 		query = `SELECT to_regclass(?)`
-	case DriverMySQL:
+	case dName == DriverMySQL:
 		query = `SELECT table_name FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = ?`
 	default:
 		return false, fmt.Errorf("unsupported dialect: %s", dName)
