@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"runtime/debug"
 
 	"fmt"
 	"github.com/uptrace/bun"
@@ -16,40 +17,57 @@ type ListOptions struct {
 	Limit int
 }
 
+type IDB interface {
+	Db() (db bun.IDB)
+	Start(opt *sql.TxOptions) error
+	Commit() error
+	Rollback() error
+	Transaction(opt *sql.TxOptions, fn TransactFunc) (err error)
+	Ctx() context.Context
+}
+
 type Transact struct {
-	db *bun.DB
-	tx *bun.Tx
+	db     *bun.DB
+	tx     bun.Tx
+	ctx    context.Context
+	active bool
 	// stack holds parent transactions when using savepoints for nesting.
-	stack  []*bun.Tx
+	stack  []bun.Tx
 	mu     sync.RWMutex
 	nested int
 }
 
-func NewTransact(db *bun.DB) (tx *Transact, err error) {
+func NewTransact(ctx context.Context, db *bun.DB) (tsx *Transact, err error) {
 	if db == nil {
 		return nil, errors.New("dbx: NewTransact with nil db")
 	}
-	tx = new(Transact)
-	tx.db = db
+	tsx = new(Transact)
+	tsx.db = db
+	tsx.ctx = ctx
 
-	return tx, nil
+	return tsx, nil
 }
 
 func (t *Transact) Db() (db bun.IDB) {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
-	if t.tx == nil {
+	if !t.active {
 		return t.db
 	}
 	return t.tx
 }
 
-func (t *Transact) Start(ctx context.Context, opt *sql.TxOptions) error {
+func (t *Transact) Ctx() context.Context {
+	return t.ctx
+}
+
+func (t *Transact) Start(opt *sql.TxOptions) error {
+	ctx := t.ctx
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
 	// If a transaction is already active, create a savepoint and switch to it.
-	if t.tx != nil {
+	if t.active {
 		// Create a savepoint (bun.Tx.BeginTx on a Tx creates a savepoint-backed Tx).
 		sp, err := t.tx.BeginTx(ctx, opt)
 		if err != nil {
@@ -57,7 +75,7 @@ func (t *Transact) Start(ctx context.Context, opt *sql.TxOptions) error {
 		}
 		// Push current tx to stack and switch active tx to the savepoint.
 		t.stack = append(t.stack, t.tx)
-		t.tx = &sp
+		t.tx = sp
 		t.nested++
 		return nil
 	}
@@ -68,7 +86,8 @@ func (t *Transact) Start(ctx context.Context, opt *sql.TxOptions) error {
 		return err
 	}
 
-	t.tx = &tx
+	t.tx = tx
+	t.active = true
 	t.nested = 1
 	t.stack = nil
 
@@ -78,7 +97,7 @@ func (t *Transact) Start(ctx context.Context, opt *sql.TxOptions) error {
 func (t *Transact) Commit() error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	if t.tx == nil {
+	if !t.active {
 		return errors.New("cannot commit: no tx active")
 	}
 
@@ -96,7 +115,8 @@ func (t *Transact) Commit() error {
 		return err
 	}
 
-	t.tx = nil
+	t.tx = bun.Tx{}
+	t.active = false
 	t.stack = nil
 	t.nested = 0
 	return nil
@@ -105,7 +125,7 @@ func (t *Transact) Commit() error {
 func (t *Transact) Rollback() error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	if t.tx == nil {
+	if !t.active {
 		return errors.New("cannot rollback: no tx active")
 	}
 
@@ -120,7 +140,8 @@ func (t *Transact) Rollback() error {
 
 	// Outermost transaction rollback.
 	err := t.tx.Rollback()
-	t.tx = nil
+	t.tx = bun.Tx{}
+	t.active = false
 	t.stack = nil
 	t.nested = 0
 	return err
@@ -131,44 +152,44 @@ func (t *Transact) popTx() {
 	parentIdx := len(t.stack) - 1
 	if parentIdx >= 0 {
 		t.tx = t.stack[parentIdx]
-		t.stack[parentIdx] = nil // Avoid memory leak
 		t.stack = t.stack[:parentIdx]
 	} else {
 		// Should not happen, but safeguard.
-		t.tx = nil
+		t.tx = bun.Tx{}
+		t.active = false
 	}
 	t.nested--
 }
 
 type TransactFunc func(ctx context.Context) error
 
-func (t *Transact) Transaction(ctx context.Context, opt *sql.TxOptions, fn TransactFunc) (err error) {
-
-	if err = t.Start(ctx, opt); err != nil {
+func (t *Transact) Transaction(opt *sql.TxOptions, fn TransactFunc) (err error) {
+	ctx := t.ctx
+	if err = t.Start(opt); err != nil {
 		return err
 	}
 
-	var committed bool
+	committed := false
 
 	defer func() {
-		r := recover()
-		if !committed || r != nil {
-			rErr := t.Rollback()
-			if rErr != nil {
-				// If we are already in error or panic, join the rollback error.
+		if r := recover(); r != nil {
+			_ = t.Rollback()
+
+			stack := debug.Stack()
+			err = fmt.Errorf("panic recovered in Transaction: %v\nStack trace:\n%s", r, stack)
+			return
+		}
+
+		// Handle normal rollback if committed is false (due to fn() or Commit() error)
+		if !committed {
+			rbErr := t.Rollback()
+			if rbErr != nil {
 				if err != nil {
-					err = errors.Join(err, fmt.Errorf("rollback failed: %w", rErr))
-				} else if r != nil {
-					// If we only have a panic, we might want to log or just ignore rollback error
-					// but joining it with nil error doesn't work well if we don't have an error variable.
-					// We'll set err so it can be potentially used if we were to return it,
-					// but since we re-panic, it's mostly for visibility if someone captures it.
-					err = fmt.Errorf("rollback failed during panic: %w", rErr)
+					err = errors.Join(err, fmt.Errorf("rollback failed: %w", rbErr))
+				} else {
+					err = rbErr
 				}
 			}
-		}
-		if r != nil {
-			panic(r)
 		}
 	}()
 

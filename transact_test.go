@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/uptrace/bun"
@@ -52,7 +53,7 @@ func setupTestDB(t *testing.T) *bun.DB {
 
 func mustNewTx(t *testing.T, db *bun.DB) *Transact {
 	t.Helper()
-	tx, err := NewTransact(db)
+	tx, err := NewTransact(context.Background(), db)
 	if err != nil {
 		t.Fatalf("NewTransact failed: %v", err)
 	}
@@ -90,15 +91,15 @@ func TestDbMethodSwitchesBetweenDBAndTx(t *testing.T) {
 		t.Fatalf("expected Db() to be *bun.DB before Start, got %T", tx.Db())
 	}
 
-	// Start transaction -> Db() should be *bun.Tx
-	if err := tx.Start(context.Background(), nil); err != nil {
+	// Start transaction -> Db() should be bun.Tx
+	if err := tx.Start(nil); err != nil {
 		t.Fatalf("Start error: %v", err)
 	}
 	switch tx.Db().(type) {
-	case *bun.Tx:
+	case bun.Tx:
 		// ok
 	default:
-		t.Fatalf("expected Db() to be *bun.Tx after Start, got %T", tx.Db())
+		t.Fatalf("expected Db() to be bun.Tx after Start, got %T", tx.Db())
 	}
 
 	if err := tx.Rollback(); err != nil {
@@ -119,7 +120,7 @@ func TestOuterCommitAndRollback(t *testing.T) {
 	tx := mustNewTx(t, db)
 
 	// Start outer tx, insert 1 row, commit
-	if err := tx.Start(context.Background(), nil); err != nil {
+	if err := tx.Start(nil); err != nil {
 		t.Fatalf("Start error: %v", err)
 	}
 	insertItem(t, tx.Db(), "a")
@@ -131,7 +132,7 @@ func TestOuterCommitAndRollback(t *testing.T) {
 	}
 
 	// Start outer tx, insert 1 row, rollback
-	if err := tx.Start(context.Background(), nil); err != nil {
+	if err := tx.Start(nil); err != nil {
 		t.Fatalf("Start error: %v", err)
 	}
 	insertItem(t, tx.Db(), "b")
@@ -148,13 +149,13 @@ func TestNestedTransactionsCommitInnerThenOuter(t *testing.T) {
 	tx := mustNewTx(t, db)
 
 	// Outer
-	if err := tx.Start(context.Background(), nil); err != nil {
+	if err := tx.Start(nil); err != nil {
 		t.Fatalf("Start outer error: %v", err)
 	}
 	insertItem(t, tx.Db(), "outer-a")
 
 	// Inner (savepoint)
-	if err := tx.Start(context.Background(), nil); err != nil {
+	if err := tx.Start(nil); err != nil {
 		t.Fatalf("Start inner error: %v", err)
 	}
 	insertItem(t, tx.Db(), "inner-b")
@@ -179,13 +180,13 @@ func TestNestedTransactionsRollbackInnerCommitOuter(t *testing.T) {
 	tx := mustNewTx(t, db)
 
 	// Outer
-	if err := tx.Start(context.Background(), nil); err != nil {
+	if err := tx.Start(nil); err != nil {
 		t.Fatalf("Start outer error: %v", err)
 	}
 	insertItem(t, tx.Db(), "outer-a")
 
 	// Inner
-	if err := tx.Start(context.Background(), nil); err != nil {
+	if err := tx.Start(nil); err != nil {
 		t.Fatalf("Start inner error: %v", err)
 	}
 	insertItem(t, tx.Db(), "inner-b")
@@ -210,7 +211,7 @@ func TestTransactionHelperSuccessAndError(t *testing.T) {
 	tx := mustNewTx(t, db)
 
 	// success path
-	if err := tx.Transaction(context.Background(), nil, func(ctx context.Context) error {
+	if err := tx.Transaction(nil, func(ctx context.Context) error {
 		insertItem(t, tx.Db(), "ok")
 		return nil
 	}); err != nil {
@@ -222,7 +223,7 @@ func TestTransactionHelperSuccessAndError(t *testing.T) {
 
 	// error path
 	wantErr := errors.New("boom")
-	if err := tx.Transaction(context.Background(), nil, func(ctx context.Context) error {
+	if err := tx.Transaction(nil, func(ctx context.Context) error {
 		insertItem(t, tx.Db(), "should-rollback")
 		return wantErr
 	}); err == nil || !errors.Is(err, wantErr) {
@@ -233,24 +234,35 @@ func TestTransactionHelperSuccessAndError(t *testing.T) {
 	}
 }
 
-func TestTransactionHelperPanicRollsBackAndRepanics(t *testing.T) {
+func TestTransactionHelperPanicRollsBackAndReturnsError(t *testing.T) {
 	db := setupTestDB(t)
 	tx := mustNewTx(t, db)
 
-	defer func() {
-		if r := recover(); r == nil {
-			t.Fatalf("expected panic to be rethrown")
-		}
-		// ensure rollback happened
-		if got := countItems(t, db); got != 0 {
-			t.Fatalf("want 0 after panic rollback, got %d", got)
-		}
-	}()
-
-	_ = tx.Transaction(context.Background(), nil, func(ctx context.Context) error {
+	err := tx.Transaction(nil, func(ctx context.Context) error {
 		insertItem(t, tx.Db(), "x")
 		panic("kaboom")
 	})
+
+	if err == nil {
+		t.Fatalf("expected error from panic, got nil")
+	}
+
+	errMsg := err.Error()
+	if !contains(errMsg, "panic recovered in Transaction: kaboom") {
+		t.Errorf("error message missing panic info: %v", errMsg)
+	}
+	if !contains(errMsg, "Stack trace:") {
+		t.Errorf("error message missing stack trace: %v", errMsg)
+	}
+
+	// ensure rollback happened
+	if got := countItems(t, db); got != 0 {
+		t.Fatalf("want 0 after panic rollback, got %d", got)
+	}
+}
+
+func contains(s, substr string) bool {
+	return strings.Contains(s, substr)
 }
 
 func TestTransactionDoubleRollbackSafety(t *testing.T) {
@@ -262,10 +274,9 @@ func TestTransactionDoubleRollbackSafety(t *testing.T) {
 	// but we can at least verify the state manually if we had access.
 	// Since we can't easily mock bun.Tx, we'll verify it doesn't panic on a manual sequence.
 
-	ctx := context.Background()
-	_ = tx.Transaction(ctx, nil, func(ctx context.Context) error {
+	_ = tx.Transaction(nil, func(ctx context.Context) error {
 		// Outer
-		return tx.Transaction(ctx, nil, func(ctx context.Context) error {
+		return tx.Transaction(nil, func(ctx context.Context) error {
 			// Inner
 			return nil
 		})
@@ -277,7 +288,7 @@ func TestTransactionDoubleRollbackSafety(t *testing.T) {
 }
 
 func TestNewTransactError(t *testing.T) {
-	_, err := NewTransact(nil)
+	_, err := NewTransact(context.Background(), nil)
 	if err == nil {
 		t.Errorf("expected error for nil db in NewTransact, got nil")
 	}
