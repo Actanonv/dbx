@@ -17,12 +17,19 @@ type Options struct {
 	maxOpenConns    int
 	maxIdleConns    int
 	connMaxLifetime time.Duration
+	noLog           bool
 }
 type OpenOptFn func(options *Options)
 
 func WithDriverName(dn DriverName) OpenOptFn {
 	return func(opt *Options) {
 		opt.driverName = string(dn)
+	}
+}
+
+func WithLog(log bool) OpenOptFn {
+	return func(opt *Options) {
+		opt.noLog = log
 	}
 }
 
@@ -103,10 +110,12 @@ func OpenDB(dsn string, opts ...OpenOptFn) (*bun.DB, error) {
 	}
 
 	bunDB := bun.NewDB(db, sqlitedialect.New(), bun.WithDiscardUnknownColumns())
-	bunDB.AddQueryHook(bundebug.NewQueryHook(
-		bundebug.WithVerbose(true),
-		//bundebug.FromEnv("BUN_DEBUG")
-	))
+	if !opt.noLog {
+		bunDB.AddQueryHook(bundebug.NewQueryHook(
+			bundebug.WithVerbose(true),
+			// bundebug.FromEnv("BUN_DEBUG")
+		))
+	}
 
 	return bunDB, nil
 }

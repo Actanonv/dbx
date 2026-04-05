@@ -26,6 +26,8 @@ type IDB interface {
 	Ctx() context.Context
 }
 
+var _ IDB = (*Transact)()
+
 type Transact struct {
 	db     *bun.DB
 	tx     bun.Tx
