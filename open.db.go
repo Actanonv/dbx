@@ -16,6 +16,7 @@ type Options struct {
 	dbFolder        string
 	maxOpenConns    int
 	maxIdleConns    int
+	connMaxIdleTime time.Duration
 	connMaxLifetime time.Duration
 	logQueries      bool
 }
@@ -51,6 +52,12 @@ func WithMaxIdleConns(n int) OpenOptFn {
 	}
 }
 
+func WithConnMaxIdleTime(n time.Duration) OpenOptFn {
+	return func(opt *Options) {
+		opt.connMaxIdleTime = n
+	}
+}
+
 func WithConnMaxLifetime(d time.Duration) OpenOptFn {
 	return func(opt *Options) {
 		opt.connMaxLifetime = d
@@ -75,7 +82,7 @@ func OpenDB(dsn string, opts ...OpenOptFn) (*bun.DB, error) {
 				"&_synchronous=NORMAL" +
 				"&_busy_timeout=5000" +
 				"&_foreign_keys=on" +
-				"&_cache_size=-65536" +
+				"&_cache_size=-4096" +
 				"&cache=private"
 		} else {
 			dsn = "file:" + dbFile +
@@ -83,7 +90,7 @@ func OpenDB(dsn string, opts ...OpenOptFn) (*bun.DB, error) {
 				"&_pragma=synchronous(NORMAL)" +
 				"&_pragma=busy_timeout(5000)" +
 				"&_pragma=foreign_keys(ON)" +
-				"&_pragma=cache_size(-65536)" +
+				"&_pragma=cache_size(-4096)" +
 				"&_pragma=temp_store(MEMORY)"
 		}
 	}
@@ -96,6 +103,7 @@ func OpenDB(dsn string, opts ...OpenOptFn) (*bun.DB, error) {
 	db.SetMaxOpenConns(opt.maxOpenConns)
 	db.SetMaxIdleConns(opt.maxIdleConns)
 	db.SetConnMaxLifetime(opt.connMaxLifetime)
+	db.SetConnMaxIdleTime(opt.connMaxIdleTime)
 
 	if err := db.Ping(); err != nil {
 		db.Close()
@@ -131,6 +139,14 @@ func setOptions(opt *Options, opts ...OpenOptFn) {
 		WithDriverName(DriverSQLite)(opt)
 	}
 
+	if opt.maxOpenConns == 0 {
+		if IsSQLite(DriverName(opt.driverName)) {
+			WithMaxOpenConns(1)(opt)
+		} else {
+			WithMaxOpenConns(10)(opt)
+		}
+	}
+
 	if opt.maxIdleConns == 0 {
 		if IsSQLite(DriverName(opt.driverName)) {
 			WithMaxIdleConns(1)(opt)
@@ -138,11 +154,16 @@ func setOptions(opt *Options, opts ...OpenOptFn) {
 			WithMaxIdleConns(2)(opt)
 		}
 	}
-	if opt.maxOpenConns == 0 {
+
+	if opt.connMaxIdleTime == 0 {
 		if IsSQLite(DriverName(opt.driverName)) {
-			WithMaxOpenConns(1)(opt)
-		} else {
-			WithMaxOpenConns(10)(opt)
+			WithConnMaxIdleTime(15 * time.Minute)(opt)
+		}
+	}
+
+	if opt.connMaxLifetime == 0 {
+		if IsSQLite(DriverName(opt.driverName)) {
+			WithConnMaxLifetime(0)(opt)
 		}
 	}
 
