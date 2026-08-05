@@ -307,6 +307,83 @@ func TestCommitRollbackWithoutActiveTx(t *testing.T) {
 	}
 }
 
+func TestCommitFailureResetsState(t *testing.T) {
+	db := setupTestDB(t)
+	tx := mustNewTx(t, db)
+
+	if err := tx.Start(nil); err != nil {
+		t.Fatalf("Start error: %v", err)
+	}
+
+	// Force rollback underlying sql.Tx out of band to make bun.Tx Commit fail
+	sqlTx := tx.tx.Tx
+	_ = sqlTx.Rollback()
+
+	// Commit should fail, but state must still be reset
+	err := tx.Commit()
+	if err == nil {
+		t.Fatalf("expected error from Commit after underlying sql.Tx rolled back")
+	}
+
+	if tx.active {
+		t.Errorf("expected active to be false after failed Commit, got true")
+	}
+	if tx.nested != 0 {
+		t.Errorf("expected nested to be 0 after failed Commit, got %d", tx.nested)
+	}
+}
+
+func TestNestedCommitFailurePopsStack(t *testing.T) {
+	db := setupTestDB(t)
+	tx := mustNewTx(t, db)
+
+	if err := tx.Start(nil); err != nil {
+		t.Fatalf("Start outer error: %v", err)
+	}
+	if err := tx.Start(nil); err != nil {
+		t.Fatalf("Start inner error: %v", err)
+	}
+
+	if tx.nested != 2 {
+		t.Fatalf("expected nested 2, got %d", tx.nested)
+	}
+
+	// Force rollback underlying inner sql.Tx out of band to cause savepoint release/commit failure
+	_ = tx.tx.Tx.Rollback()
+
+	// Commit inner savepoint - will fail, but stack must pop
+	_ = tx.Commit()
+
+	if tx.nested != 1 {
+		t.Errorf("expected nested to be 1 after failed inner Commit, got %d", tx.nested)
+	}
+
+	// Clean up outer tx
+	_ = tx.Rollback()
+}
+
+func TestRollbackFailureResetsState(t *testing.T) {
+	db := setupTestDB(t)
+	tx := mustNewTx(t, db)
+
+	if err := tx.Start(nil); err != nil {
+		t.Fatalf("Start error: %v", err)
+	}
+
+	// Force rollback underlying sql.Tx out of band
+	_ = tx.tx.Tx.Rollback()
+
+	// Rollback should fail on sql.Tx, but Transact state must be reset
+	_ = tx.Rollback()
+
+	if tx.active {
+		t.Errorf("expected active to be false after failed Rollback, got true")
+	}
+	if tx.nested != 0 {
+		t.Errorf("expected nested to be 0 after failed Rollback, got %d", tx.nested)
+	}
+}
+
 // Silence staticcheck warning about unused import in tests when running in certain modes
 var _ = fmt.Sprintf
 var _ = os.Stat

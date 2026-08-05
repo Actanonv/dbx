@@ -11,12 +11,6 @@ import (
 	"sync"
 )
 
-type ListOptions struct {
-	Where string
-	Args  []any
-	Limit int
-}
-
 type IDB interface {
 	Db() (db bun.IDB)
 	Start(opt *sql.TxOptions) error
@@ -105,23 +99,18 @@ func (t *Transact) Commit() error {
 
 	if t.nested > 1 {
 		// Commit current savepoint and revert to parent tx.
-		if err := t.tx.Commit(); err != nil {
-			return err
-		}
+		err := t.tx.Commit()
 		t.popTx()
-		return nil
-	}
-
-	// Outermost transaction commit.
-	if err := t.tx.Commit(); err != nil {
 		return err
 	}
 
+	// Outermost transaction commit.
+	err := t.tx.Commit()
 	t.tx = bun.Tx{}
 	t.active = false
 	t.stack = nil
 	t.nested = 0
-	return nil
+	return err
 }
 
 func (t *Transact) Rollback() error {
@@ -133,11 +122,9 @@ func (t *Transact) Rollback() error {
 
 	if t.nested > 1 {
 		// Rollback to the current savepoint and revert to parent tx.
-		if err := t.tx.Rollback(); err != nil {
-			return err
-		}
+		err := t.tx.Rollback()
 		t.popTx()
-		return nil
+		return err
 	}
 
 	// Outermost transaction rollback.
@@ -154,6 +141,7 @@ func (t *Transact) popTx() {
 	parentIdx := len(t.stack) - 1
 	if parentIdx >= 0 {
 		t.tx = t.stack[parentIdx]
+		t.stack[parentIdx] = bun.Tx{}
 		t.stack = t.stack[:parentIdx]
 	} else {
 		// Should not happen, but safeguard.
@@ -175,21 +163,30 @@ func (t *Transact) Transaction(opt *sql.TxOptions, fn TransactFunc) (err error) 
 
 	defer func() {
 		if r := recover(); r != nil {
-			_ = t.Rollback()
+			func() {
+				defer func() { _ = recover() }()
+				_ = t.Rollback()
+			}()
 
 			stack := debug.Stack()
 			err = fmt.Errorf("panic recovered in Transaction: %v\nStack trace:\n%s", r, stack)
 			return
 		}
 
-		// Handle normal rollback if committed is false (due to fn() or Commit() error)
+		// Handle normal rollback if committed is false and tx is still active
 		if !committed {
-			rbErr := t.Rollback()
-			if rbErr != nil {
-				if err != nil {
-					err = errors.Join(err, fmt.Errorf("rollback failed: %w", rbErr))
-				} else {
-					err = rbErr
+			t.mu.RLock()
+			active := t.active
+			t.mu.RUnlock()
+
+			if active {
+				rbErr := t.Rollback()
+				if rbErr != nil {
+					if err != nil {
+						err = errors.Join(err, fmt.Errorf("rollback failed: %w", rbErr))
+					} else {
+						err = rbErr
+					}
 				}
 			}
 		}

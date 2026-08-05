@@ -21,8 +21,8 @@ func DbFilePath(name, dbFolder string) (string, error) {
 	}
 
 	dbf := filepath.Clean(dbFolder)
-	if strings.HasPrefix(name, dbf) {
-		name = strings.TrimPrefix(name, dbf)
+	if after, ok := strings.CutPrefix(name, dbf); ok {
+		name = after
 	}
 
 	dbFile := filepath.Join(dbf, name)
