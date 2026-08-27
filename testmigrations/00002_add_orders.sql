@@ -1,0 +1,10 @@
+-- +goose Up
+CREATE TABLE IF NOT EXISTS orders (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    item_id INTEGER NOT NULL,
+    quantity INTEGER NOT NULL DEFAULT 1,
+    FOREIGN KEY(item_id) REFERENCES items(id) ON DELETE CASCADE
+);
+
+-- +goose Down
+DROP TABLE IF EXISTS orders;

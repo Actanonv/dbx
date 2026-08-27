@@ -39,6 +39,10 @@ func createSQLiteDBFile(name, dbFolder string) (dbFile string, err error) {
 		return "", err
 	}
 	if errors.Is(err, ErrDBFileNotFound) {
+		dir := filepath.Dir(dbFile)
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			return "", fmt.Errorf("failed to create db directory(%s): %w", dir, err)
+		}
 		var dbFh *os.File
 		if dbFh, err = os.Create(dbFile); err != nil {
 			return "", fmt.Errorf("failed to create db file(%s): %w", dbFile, err)

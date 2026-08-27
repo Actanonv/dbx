@@ -266,3 +266,41 @@ func TestTableExists(t *testing.T) {
 		})
 	}
 }
+
+func TestOpenDB_Errors(t *testing.T) {
+	tmp := t.TempDir()
+	// Nonexistent SQLite file should fail
+	_, err := OpenDB("nonexistent_db", WithDbFolder(tmp), WithDriverName(DriverSQLite))
+	if err == nil {
+		t.Fatal("expected error opening non-existent DB, got nil")
+	}
+}
+
+func TestCreateDB_WithoutSource_ModernC(t *testing.T) {
+	tmp := t.TempDir()
+	name := "modernc_nosource"
+
+	// Create DB without source using DriverSQLiteMc
+	if err := CreateDB(name, CreateWithDriverName(DriverSQLiteMc), CreateWithDbFolder(tmp)); err != nil {
+		t.Fatalf("CreateDB with DriverSQLiteMc failed: %v", err)
+	}
+
+	db, err := OpenDB(name, WithDbFolder(tmp), WithDriverName(DriverSQLiteMc))
+	if err != nil {
+		t.Fatalf("OpenDB failed: %v", err)
+	}
+	defer db.Close()
+
+	if err := db.Ping(); err != nil {
+		t.Fatalf("Ping failed: %v", err)
+	}
+}
+
+func TestCreateDB_Errors(t *testing.T) {
+	// Invalid driver should return error
+	err := CreateDB("invalid_driver_db", CreateWithDriverName("invalid_nonexistent_driver"))
+	if err == nil {
+		t.Fatal("expected error for invalid driver, got nil")
+	}
+}
+
