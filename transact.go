@@ -11,17 +11,27 @@ import (
 	"sync"
 )
 
+// IDB provides an interface for interacting with databases and transactions seamlessly.
+// It allows business logic to execute queries against Db() without needing to know whether
+// an active transaction is in progress.
 type IDB interface {
+	// Db returns the active bun.IDB (either *bun.DB when idle, or bun.Tx when a transaction is active).
 	Db() (db bun.IDB)
+	// Start begins a transaction or creates a savepoint if a transaction is already active.
 	Start(opt *sql.TxOptions) error
+	// Commit commits the current transaction level or releases the active savepoint.
 	Commit() error
+	// Rollback rolls back the current transaction level or reverts to the previous savepoint.
 	Rollback() error
+	// Transaction executes fn inside a transaction block with automatic commit, rollback, and panic recovery.
 	Transaction(opt *sql.TxOptions, fn TransactFunc) (err error)
+	// Ctx returns the context associated with this transaction manager.
 	Ctx() context.Context
 }
 
 var _ IDB = (*Transact)(nil)
 
+// Transact manages database transactions and nested savepoints with automatic rollback and panic recovery.
 type Transact struct {
 	db     *bun.DB
 	tx     bun.Tx
@@ -33,6 +43,7 @@ type Transact struct {
 	nested int
 }
 
+// NewTransact initializes a new transaction manager bound to the provided context and database instance.
 func NewTransact(ctx context.Context, db *bun.DB) (tsx *Transact, err error) {
 	if db == nil {
 		return nil, errors.New("dbx: NewTransact with nil db")
@@ -44,6 +55,9 @@ func NewTransact(ctx context.Context, db *bun.DB) (tsx *Transact, err error) {
 	return tsx, nil
 }
 
+// Db returns the current active bun.IDB executor.
+// If a transaction is active, it returns the current bun.Tx (or savepoint-backed Tx).
+// If no transaction is active, it returns the underlying *bun.DB.
 func (t *Transact) Db() (db bun.IDB) {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
@@ -53,10 +67,12 @@ func (t *Transact) Db() (db bun.IDB) {
 	return t.tx
 }
 
+// Ctx returns the context associated with this Transact instance.
 func (t *Transact) Ctx() context.Context {
 	return t.ctx
 }
 
+// Start begins a transaction or creates a new nested savepoint if a transaction is already in progress.
 func (t *Transact) Start(opt *sql.TxOptions) error {
 	ctx := t.ctx
 	t.mu.Lock()
@@ -90,6 +106,8 @@ func (t *Transact) Start(opt *sql.TxOptions) error {
 	return nil
 }
 
+// Commit commits the current transaction level. If nested inside a savepoint,
+// it releases the savepoint and reverts to the parent transaction.
 func (t *Transact) Commit() error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -113,6 +131,8 @@ func (t *Transact) Commit() error {
 	return err
 }
 
+// Rollback rolls back the current transaction level. If nested inside a savepoint,
+// it rolls back to the savepoint and reverts to the parent transaction.
 func (t *Transact) Rollback() error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -151,8 +171,12 @@ func (t *Transact) popTx() {
 	t.nested--
 }
 
+// TransactFunc is a function executed within a managed transaction block.
 type TransactFunc func(ctx context.Context) error
 
+// Transaction runs fn inside a transaction block. If fn returns an error or panics,
+// the transaction (or current nested savepoint) is rolled back. If fn returns nil,
+// the transaction is committed.
 func (t *Transact) Transaction(opt *sql.TxOptions, fn TransactFunc) (err error) {
 	ctx := t.ctx
 	if err = t.Start(opt); err != nil {

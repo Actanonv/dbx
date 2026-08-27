@@ -6,6 +6,9 @@ require (
 	github.com/mattn/go-sqlite3 v1.14.28
 	github.com/pressly/goose/v3 v3.25.0
 	github.com/uptrace/bun v1.2.15
+	github.com/uptrace/bun/dialect/mssqldialect v1.2.15
+	github.com/uptrace/bun/dialect/mysqldialect v1.2.15
+	github.com/uptrace/bun/dialect/pgdialect v1.2.15
 	github.com/uptrace/bun/dialect/sqlitedialect v1.2.15
 	github.com/uptrace/bun/extra/bundebug v1.2.15
 	modernc.org/sqlite v1.39.0
@@ -28,6 +31,7 @@ require (
 	github.com/vmihailenco/tagparser/v2 v2.0.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	golang.org/x/exp v0.0.0-20250911091902-df9299821621 // indirect
+	golang.org/x/mod v0.28.0 // indirect
 	golang.org/x/sync v0.17.0 // indirect
 	golang.org/x/sys v0.36.0 // indirect
 	modernc.org/libc v1.66.9 // indirect

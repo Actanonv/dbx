@@ -99,3 +99,50 @@ func TestCache_GetUpdatesLastAccessed(t *testing.T) {
 		t.Fatal("DB should have been cleaned up after inactivity")
 	}
 }
+
+func TestCache_Delete(t *testing.T) {
+	tmp := t.TempDir()
+	dbName := "delete_test"
+	if err := CreateDB(dbName, CreateWithDriverName(DriverSQLite), CreateWithDbFolder(tmp)); err != nil {
+		t.Fatalf("CreateDB failed: %v", err)
+	}
+
+	c := NewCache(10 * time.Minute)
+	defer c.Close()
+
+	db, err := c.GetOrOpen(dbName, WithDbFolder(tmp))
+	if err != nil {
+		t.Fatalf("GetOrOpen failed: %v", err)
+	}
+
+	if c.Has(dbName) == nil {
+		t.Fatal("expected DB in cache")
+	}
+
+	// Delete existing DB
+	if err := c.Delete(dbName); err != nil {
+		t.Fatalf("Delete failed: %v", err)
+	}
+
+	// Verify evicted from cache
+	if c.Has(dbName) != nil {
+		t.Fatal("expected DB to be removed from cache after Delete")
+	}
+
+	// Verify DB is closed
+	if err := db.Ping(); err == nil {
+		t.Fatal("expected DB connection to be closed after Delete")
+	}
+
+	// Idempotent Delete on non-existing key
+	if err := c.Delete("non_existing_key"); err != nil {
+		t.Fatalf("expected nil error deleting non-existent key, got: %v", err)
+	}
+
+	// Delete on closed cache
+	_ = c.Close()
+	if err := c.Delete(dbName); err != ErrCacheClosed {
+		t.Fatalf("expected ErrCacheClosed on closed cache Delete, got: %v", err)
+	}
+}
+

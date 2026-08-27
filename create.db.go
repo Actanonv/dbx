@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 )
 
+// CreateOptions configures database creation and migration behavior.
 type CreateOptions struct {
 	driverName DriverName
 	dbFolder   string
@@ -14,18 +15,24 @@ type CreateOptions struct {
 	srcFolder  string
 }
 
+// CreateOptFn is a functional option for configuring CreateDB and MigrateDB.
 type CreateOptFn func(options *CreateOptions)
 
-// CreateDB creates a new database specified by the dsn and runs migrations.
-// Provides the following options:
+// CreateDB creates a new database specified by the dsn and optionally runs migrations.
 //
-//   - CreateWithDriverName(driverName DriverName) - specify the database driver (default: DriverSQLite)
-//   - CreateWithDbFolder(folder string) - specify the folder to create the SQLite database file in (default: "./data")
-//   - CreateWithSource(fs embed.FS) - specify the embedded filesystem containing migration files
-//   - CreateWithSrcFolder(folder string) - specify the folder within the embedded filesystem containing migration files
+// For SQLite, if the database file does not exist, it will be created in the specified
+// dbFolder (defaulting to "./data") with optimized WAL mode and pragma configurations.
+// If a migration source is provided (via WithSource or CreateWithSource), all migrations
+// in the specified folder will be executed.
 //
-// For SQLite, if the database file already exists, it will not be overwritten.
-// For other databases, ensure that the user has the necessary permissions to create a new database.
+// Example:
+//
+//	err := dbx.CreateDB("myapp",
+//	    dbx.WithDriverName(dbx.DriverSQLite),
+//	    dbx.WithDbFolder("./data"),
+//	    dbx.WithSource(migrationsFS),
+//	    dbx.WithSrcFolder("migrations"),
+//	)
 func CreateDB(dsn string, opts ...CreateOptFn) error {
 	option := CreateOptions{}
 	setCreateOptions(&option, opts...)
@@ -70,32 +77,45 @@ func CreateDB(dsn string, opts ...CreateOptFn) error {
 	return MigrateDB(dsn, opts...)
 }
 
+// CreateWithDriverName specifies the database driver to use (default: DriverSQLite).
 func CreateWithDriverName(dn DriverName) CreateOptFn {
 	return func(opt *CreateOptions) {
 		opt.driverName = dn
 	}
 }
 
+// CreateWithDbFolder specifies the directory containing SQLite database files (default: "./data").
 func CreateWithDbFolder(nme string) CreateOptFn {
 	return func(opt *CreateOptions) {
 		opt.dbFolder = filepath.Clean(nme)
 	}
 }
 
+// CreateWithSource specifies the embedded filesystem containing migration SQL files.
 func CreateWithSource(fs embed.FS) CreateOptFn {
 	return func(opt *CreateOptions) {
 		opt.source = &fs
 	}
 }
 
+// CreateWithSrcFolder specifies the subdirectory within the embed.FS containing migration SQL files.
 func CreateWithSrcFolder(n string) CreateOptFn {
 	return func(opt *CreateOptions) {
 		opt.srcFolder = n
 	}
 }
 
-func setCreateOptions(opt *CreateOptions, opts ...CreateOptFn) {
+// WithSource is an alias for CreateWithSource to provide consistent option naming across dbx functions.
+func WithSource(fs embed.FS) CreateOptFn {
+	return CreateWithSource(fs)
+}
 
+// WithSrcFolder is an alias for CreateWithSrcFolder to provide consistent option naming across dbx functions.
+func WithSrcFolder(n string) CreateOptFn {
+	return CreateWithSrcFolder(n)
+}
+
+func setCreateOptions(opt *CreateOptions, opts ...CreateOptFn) {
 	// Apply all options
 	for _, optFn := range opts {
 		optFn(opt)

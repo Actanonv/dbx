@@ -36,6 +36,12 @@ github.com/tmthrgd/go-hex v0.0.0-20190904060850-447a3041c3bc h1:9lRDQMhESg+zvGYm
 github.com/tmthrgd/go-hex v0.0.0-20190904060850-447a3041c3bc/go.mod h1:bciPuU6GHm1iF1pBvUfxfsH0Wmnc2VbpgvbI9ZWuIRs=
 github.com/uptrace/bun v1.2.15 h1:Ut68XRBLDgp9qG9QBMa9ELWaZOmzHNdczHQdrOZbEFE=
 github.com/uptrace/bun v1.2.15/go.mod h1:Eghz7NonZMiTX/Z6oKYytJ0oaMEJ/eq3kEV4vSqG038=
+github.com/uptrace/bun/dialect/mssqldialect v1.2.15 h1:QbXtaIlBwx8z0PctUzAQrg4uxRRAKUhkOV4WJvkNo74=
+github.com/uptrace/bun/dialect/mssqldialect v1.2.15/go.mod h1:PJxf6utV3uwiBww37CQVD5jvarUKkJHNqSWDO1GkmN4=
+github.com/uptrace/bun/dialect/mysqldialect v1.2.15 h1:z/Seg0ljdqoATl0RGPBLHkod1bT0RofL5nNvqdt+UcM=
+github.com/uptrace/bun/dialect/mysqldialect v1.2.15/go.mod h1:VUi7mXAL3ttEphcdDta+dXeB7wyI/uvQiE6G8S8ipSQ=
+github.com/uptrace/bun/dialect/pgdialect v1.2.15 h1:er+/3giAIqpfrXJw+KP9B7ujyQIi5XkPnFmgjAVL6bA=
+github.com/uptrace/bun/dialect/pgdialect v1.2.15/go.mod h1:QSiz6Qpy9wlGFsfpf7UMSL6mXAL1jDJhFwuOVacCnOQ=
 github.com/uptrace/bun/dialect/sqlitedialect v1.2.15 h1:7upGMVjFRB1oI78GQw6ruNLblYn5CR+kxqcbbeBBils=
 github.com/uptrace/bun/dialect/sqlitedialect v1.2.15/go.mod h1:c7YIDaPNS2CU2uI1p7umFuFWkuKbDcPDDvp+DLHZnkI=
 github.com/uptrace/bun/extra/bundebug v1.2.15 h1:IY2Z/pVyVg0ApWnQ/pEnwe6BWxlDDATCz7IFZghutCs=

@@ -7,10 +7,15 @@ import (
 	"time"
 
 	"github.com/uptrace/bun"
+	"github.com/uptrace/bun/dialect/mssqldialect"
+	"github.com/uptrace/bun/dialect/mysqldialect"
+	"github.com/uptrace/bun/dialect/pgdialect"
 	"github.com/uptrace/bun/dialect/sqlitedialect"
 	"github.com/uptrace/bun/extra/bundebug"
+	"github.com/uptrace/bun/schema"
 )
 
+// Options holds configuration settings for opening database connections.
 type Options struct {
 	driverName      string
 	dbFolder        string
@@ -20,52 +25,88 @@ type Options struct {
 	connMaxLifetime time.Duration
 	logQueries      bool
 }
+
+// OpenOptFn is a functional option for configuring OpenDB.
 type OpenOptFn func(options *Options)
 
+// WithDriverName specifies the database driver to use (default: DriverSQLite).
 func WithDriverName(dn DriverName) OpenOptFn {
 	return func(opt *Options) {
 		opt.driverName = string(dn)
 	}
 }
 
+// WithLog enables or disables verbose SQL query logging via bundebug.
 func WithLog(log bool) OpenOptFn {
 	return func(opt *Options) {
 		opt.logQueries = log
 	}
 }
 
+// WithDbFolder specifies the directory where SQLite database files are stored (default: "./data").
 func WithDbFolder(nme string) OpenOptFn {
 	return func(opt *Options) {
 		opt.dbFolder = filepath.Clean(nme)
 	}
 }
 
+// WithMaxOpenConns sets the maximum number of open connections in the pool.
 func WithMaxOpenConns(n int) OpenOptFn {
 	return func(opt *Options) {
 		opt.maxOpenConns = n
 	}
 }
 
+// WithMaxIdleConns sets the maximum number of idle connections in the pool.
 func WithMaxIdleConns(n int) OpenOptFn {
 	return func(opt *Options) {
 		opt.maxIdleConns = n
 	}
 }
 
+// WithConnMaxIdleTime sets the maximum amount of time a connection may be idle before being closed.
 func WithConnMaxIdleTime(n time.Duration) OpenOptFn {
 	return func(opt *Options) {
 		opt.connMaxIdleTime = n
 	}
 }
 
+// WithConnMaxLifetime sets the maximum amount of time a connection may be reused.
 func WithConnMaxLifetime(d time.Duration) OpenOptFn {
 	return func(opt *Options) {
 		opt.connMaxLifetime = d
 	}
 }
 
-// OpenDB opens a new database connection.
-// for sqlite, dsn should be a file name (without extension)
+func bunDialect(driver DriverName) schema.Dialect {
+	switch {
+	case IsSQLite(driver):
+		return sqlitedialect.New()
+	case driver == DriverPostgres || driver == DriverPgx:
+		return pgdialect.New()
+	case driver == DriverMySQL:
+		return mysqldialect.New()
+	case driver == DriverMSSQL:
+		return mssqldialect.New()
+	default:
+		return sqlitedialect.New()
+	}
+}
+
+// OpenDB opens a new database connection and wraps it in a *bun.DB instance.
+//
+// For SQLite, dsn should be the database file name (e.g. "myapp" or "myapp.db").
+// OpenDB automatically applies WAL mode, foreign keys, synchronous=NORMAL,
+// busy timeouts, and SQLite-tailored connection pool settings.
+//
+// For PostgreSQL, MySQL, or MSSQL, dsn is the connection string/URI.
+//
+// Example:
+//
+//	db, err := dbx.OpenDB("myapp",
+//	    dbx.WithDriverName(dbx.DriverSQLite),
+//	    dbx.WithDbFolder("./data"),
+//	)
 func OpenDB(dsn string, opts ...OpenOptFn) (*bun.DB, error) {
 	var opt Options
 	setOptions(&opt, opts...)
@@ -117,11 +158,10 @@ func OpenDB(dsn string, opts ...OpenOptFn) (*bun.DB, error) {
 		}
 	}
 
-	bunDB := bun.NewDB(db, sqlitedialect.New(), bun.WithDiscardUnknownColumns())
+	bunDB := bun.NewDB(db, bunDialect(driver), bun.WithDiscardUnknownColumns())
 	if opt.logQueries {
 		bunDB.AddQueryHook(bundebug.NewQueryHook(
 			bundebug.WithVerbose(true),
-			// bundebug.FromEnv("BUN_DEBUG")
 		))
 	}
 
@@ -129,7 +169,6 @@ func OpenDB(dsn string, opts ...OpenOptFn) (*bun.DB, error) {
 }
 
 func setOptions(opt *Options, opts ...OpenOptFn) {
-
 	// Apply all options
 	for _, optFn := range opts {
 		optFn(opt)

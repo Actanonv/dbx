@@ -304,3 +304,29 @@ func TestCreateDB_Errors(t *testing.T) {
 	}
 }
 
+func TestBunDialect_Mapping(t *testing.T) {
+	tests := []struct {
+		driver DriverName
+		want   string
+	}{
+		{DriverSQLite, "sqlite"},
+		{DriverSQLiteMc, "sqlite"},
+		{DriverPostgres, "pg"},
+		{DriverPgx, "pg"},
+		{DriverMySQL, "mysql"},
+		{DriverMSSQL, "mssql"},
+		{DriverName("unknown"), "sqlite"},
+	}
+
+	for _, tt := range tests {
+		d := bunDialect(tt.driver)
+		if d == nil {
+			t.Fatalf("expected non-nil dialect for %s", tt.driver)
+		}
+		if d.Name().String() != tt.want {
+			t.Errorf("bunDialect(%s).Name() = %s; want %s", tt.driver, d.Name().String(), tt.want)
+		}
+	}
+}
+
+

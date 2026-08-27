@@ -2,20 +2,25 @@ package dbx
 
 import (
 	"errors"
+	"fmt"
 	"log/slog"
 	"sync"
 	"time"
 
-	"fmt"
 	"github.com/uptrace/bun"
 )
 
 var (
-	ErrCacheClosed        = errors.New("cache is closed")
-	ErrDatabaseNotFound   = errors.New("database not found in cache")
+	// ErrCacheClosed is returned when an operation is attempted on a closed Cache.
+	ErrCacheClosed = errors.New("cache is closed")
+	// ErrDatabaseNotFound is returned when a requested database key does not exist in the Cache.
+	ErrDatabaseNotFound = errors.New("database not found in cache")
+	// ErrDatabaseOpenFailed is returned when opening a database fails across concurrent waiting goroutines.
 	ErrDatabaseOpenFailed = errors.New("database failed to open in another goroutine")
 )
 
+// Cache manages a thread-safe pool of database connections with automatic background cleanup
+// of inactive connections and double-checked locking to protect against thundering herds.
 type Cache struct {
 	mu               sync.Mutex
 	cache            map[string]*bun.DB
@@ -26,6 +31,9 @@ type Cache struct {
 	inactiveDuration time.Duration
 }
 
+// NewCache creates and starts a new connection cache.
+// Inactive database connections that have not been accessed for longer than
+// inactiveDuration are automatically closed and evicted.
 func NewCache(inactiveDuration time.Duration) *Cache {
 	c := &Cache{
 		mu:               sync.Mutex{},
@@ -41,6 +49,8 @@ func NewCache(inactiveDuration time.Duration) *Cache {
 	return c
 }
 
+// Has checks if a database with the given name is currently active in the cache without updating its last accessed time.
+// Returns the *bun.DB instance if found, or nil if not present or if the cache is closed.
 func (c *Cache) Has(name string) *bun.DB {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -58,6 +68,8 @@ func (c *Cache) Has(name string) *bun.DB {
 	return db
 }
 
+// Get retrieves an existing database connection from the cache and updates its last accessed time.
+// Returns ErrDatabaseNotFound if the connection is not currently in the cache.
 func (c *Cache) Get(name string) (db *bun.DB, err error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -77,6 +89,10 @@ func (c *Cache) Get(name string) (db *bun.DB, err error) {
 	return db, nil
 }
 
+// GetOrOpen retrieves an existing database connection from the cache, or opens and caches
+// a new connection using OpenDB if not already present.
+// It uses per-key locking so that concurrent requests for the same database name only
+// open the database once (preventing thundering herd).
 func (c *Cache) GetOrOpen(name string, openOptions ...OpenOptFn) (db *bun.DB, err error) {
 	c.mu.Lock()
 	select {
@@ -157,6 +173,8 @@ func (c *Cache) GetOrOpen(name string, openOptions ...OpenOptFn) (db *bun.DB, er
 	return db, nil
 }
 
+// Set manually stores a bun.DB instance in the cache.
+// Returns false if the key already exists or if the cache is closed.
 func (c *Cache) Set(name string, db *bun.DB) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -176,6 +194,34 @@ func (c *Cache) Set(name string, db *bun.DB) bool {
 	return true
 }
 
+// Delete closes and removes a specific database connection from the cache.
+// Returns ErrCacheClosed if the cache is closed, or nil if deleted or not found.
+func (c *Cache) Delete(name string) error {
+	c.mu.Lock()
+	select {
+	case <-c.quit:
+		c.mu.Unlock()
+		return ErrCacheClosed
+	default:
+	}
+
+	db, found := c.cache[name]
+	if !found {
+		c.mu.Unlock()
+		return nil
+	}
+
+	delete(c.cache, name)
+	delete(c.lastAccessed, name)
+	c.mu.Unlock()
+
+	if db != nil {
+		return db.Close()
+	}
+	return nil
+}
+
+// Close gracefully closes all open database connections in the cache and stops the cleanup goroutine.
 func (c *Cache) Close() error {
 	c.closeOnce.Do(func() {
 		close(c.quit)
@@ -202,6 +248,7 @@ func (c *Cache) Close() error {
 	return nil
 }
 
+// Cleanup runs a background loop to evict connections that have exceeded the inactive duration.
 func (c *Cache) Cleanup() {
 	// Use 1/10th of inactiveDuration for ticker, but at least 1 second and at most 1 minute
 	tickDuration := c.inactiveDuration / 10
