@@ -2,7 +2,6 @@ package dbx
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -11,9 +10,8 @@ import (
 	"github.com/uptrace/bun"
 )
 
-var ErrDBFileNotFound = errors.New("db file not found")
-
-// DbFilePath converts a name into a full path to the db including the file extension
+// DbFilePath converts a database name into a full absolute path to the SQLite database file.
+// It ensures that the parent directory exists on disk.
 func DbFilePath(name, dbFolder string) (string, error) {
 	name = filepath.Clean(name)
 	if filepath.Ext(name) == "" {
@@ -22,47 +20,25 @@ func DbFilePath(name, dbFolder string) (string, error) {
 
 	dbf := filepath.Clean(dbFolder)
 	if after, ok := strings.CutPrefix(name, dbf); ok {
-		name = after
+		name = strings.TrimPrefix(after, string(filepath.Separator))
 	}
 
 	dbFile := filepath.Join(dbf, name)
-	if _, err := os.Stat(dbFile); os.IsNotExist(err) {
-		return dbFile, fmt.Errorf("%w: %s", ErrDBFileNotFound, dbFile)
+	dir := filepath.Dir(dbFile)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return "", fmt.Errorf("failed to create db directory (%s): %w", dir, err)
 	}
 
 	return filepath.Abs(dbFile)
 }
 
-func createSQLiteDBFile(name, dbFolder string) (dbFile string, err error) {
-	dbFile, err = DbFilePath(name, dbFolder)
-	if err != nil && !errors.Is(err, ErrDBFileNotFound) {
-		return "", err
-	}
-	if errors.Is(err, ErrDBFileNotFound) {
-		dir := filepath.Dir(dbFile)
-		if err := os.MkdirAll(dir, 0755); err != nil {
-			return "", fmt.Errorf("failed to create db directory(%s): %w", dir, err)
-		}
-		var dbFh *os.File
-		if dbFh, err = os.Create(dbFile); err != nil {
-			return "", fmt.Errorf("failed to create db file(%s): %w", dbFile, err)
-		}
-		defer func() {
-			if dbFh != nil {
-				dbFh.Close()
-			}
-		}()
-	}
-
-	return dbFile, nil
-}
-
-// TableExists checks if a table exists in the database
+// TableExists checks if a table exists in the database.
+// Supports SQLite, PostgreSQL, and MySQL.
 func TableExists(ctx context.Context, db *bun.DB, tableName string) (bool, error) {
 	// Normalize table name (strip quotes/backticks if any)
 	tableName = strings.Trim(tableName, `"'`)
 
-	// Get current dName
+	// Get current dialect name
 	dName := db.Dialect().Name()
 
 	var query string

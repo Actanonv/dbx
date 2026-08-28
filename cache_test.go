@@ -1,22 +1,22 @@
 package dbx
 
 import (
-	"os"
+	"context"
 	"testing"
 	"time"
+
+	"github.com/uptrace/bun"
 )
 
 func TestCache_Cleanup(t *testing.T) {
-	_ = os.MkdirAll("./data", 0755)
+	tmp := t.TempDir()
 	dbName := "cleanup_test"
-	_ = CreateDB(dbName)
-	defer os.Remove("./data/cleanup_test.db")
 
 	inactive := 300 * time.Millisecond
 	c := NewCache(inactive)
 	defer c.Close()
 
-	db, err := c.GetOrOpen(dbName)
+	db, err := c.GetOrOpen(dbName, WithDbFolder(tmp), WithDriverName(DriverSQLite))
 	if err != nil {
 		t.Fatalf("GetOrOpen failed: %v", err)
 	}
@@ -28,7 +28,6 @@ func TestCache_Cleanup(t *testing.T) {
 	// Wait for cleanup to happen
 	// Cleanup runs every inactive/10, but at least 1s.
 	// Since we set inactive to 300ms, the ticker is 1s.
-	// We need to wait more than 1s.
 	time.Sleep(1500 * time.Millisecond)
 
 	if c.Has(dbName) != nil {
@@ -43,13 +42,11 @@ func TestCache_Cleanup(t *testing.T) {
 }
 
 func TestCache_CloseClosesDBs(t *testing.T) {
-	_ = os.MkdirAll("./data", 0755)
+	tmp := t.TempDir()
 	dbName := "close_test"
-	_ = CreateDB(dbName)
-	defer os.Remove("./data/close_test.db")
 
 	c := NewCache(30 * time.Minute)
-	db, err := c.GetOrOpen(dbName)
+	db, err := c.GetOrOpen(dbName, WithDbFolder(tmp), WithDriverName(DriverSQLite))
 	if err != nil {
 		t.Fatalf("GetOrOpen failed: %v", err)
 	}
@@ -67,16 +64,17 @@ func TestCache_CloseClosesDBs(t *testing.T) {
 }
 
 func TestCache_GetUpdatesLastAccessed(t *testing.T) {
-	_ = os.MkdirAll("./data", 0755)
+	tmp := t.TempDir()
 	dbName := "access_test"
-	_ = CreateDB(dbName)
-	defer os.Remove("./data/access_test.db")
 
 	inactive := 1500 * time.Millisecond // 1s ticker
 	c := NewCache(inactive)
 	defer c.Close()
 
-	_, _ = c.GetOrOpen(dbName)
+	_, err := c.GetOrOpen(dbName, WithDbFolder(tmp), WithDriverName(DriverSQLite))
+	if err != nil {
+		t.Fatalf("GetOrOpen failed: %v", err)
+	}
 
 	// 0s: Set (lastAccess=0s)
 	// 1s: Ticker (since=1s < 1.5s, NO cleanup)
@@ -103,14 +101,11 @@ func TestCache_GetUpdatesLastAccessed(t *testing.T) {
 func TestCache_Delete(t *testing.T) {
 	tmp := t.TempDir()
 	dbName := "delete_test"
-	if err := CreateDB(dbName, CreateWithDriverName(DriverSQLite), CreateWithDbFolder(tmp)); err != nil {
-		t.Fatalf("CreateDB failed: %v", err)
-	}
 
 	c := NewCache(10 * time.Minute)
 	defer c.Close()
 
-	db, err := c.GetOrOpen(dbName, WithDbFolder(tmp))
+	db, err := c.GetOrOpen(dbName, WithDbFolder(tmp), WithDriverName(DriverSQLite))
 	if err != nil {
 		t.Fatalf("GetOrOpen failed: %v", err)
 	}
@@ -143,6 +138,41 @@ func TestCache_Delete(t *testing.T) {
 	_ = c.Close()
 	if err := c.Delete(dbName); err != ErrCacheClosed {
 		t.Fatalf("expected ErrCacheClosed on closed cache Delete, got: %v", err)
+	}
+}
+
+func TestCache_WithOnInit(t *testing.T) {
+	tmp := t.TempDir()
+	c := NewCache(10 * time.Minute)
+	defer c.Close()
+
+	ctx := context.Background()
+	dbName := "tenant_with_schema"
+
+	db, err := c.GetOrOpen(dbName,
+		WithDbFolder(tmp),
+		WithDriverName(DriverSQLite),
+		WithOnInit(func(d *bun.DB) error {
+			_, err := d.ExecContext(ctx, "CREATE TABLE tenant_configs (key TEXT PRIMARY KEY, val TEXT)")
+			return err
+		}),
+	)
+	if err != nil {
+		t.Fatalf("GetOrOpen with OnInit failed: %v", err)
+	}
+
+	exists, err := TableExists(ctx, db, "tenant_configs")
+	if err != nil || !exists {
+		t.Fatalf("expected tenant_configs table to exist: %v", err)
+	}
+
+	// Subsequent GetOrOpen gets cached connection
+	cachedDB, err := c.GetOrOpen(dbName, WithDbFolder(tmp))
+	if err != nil {
+		t.Fatalf("subsequent GetOrOpen failed: %v", err)
+	}
+	if cachedDB != db {
+		t.Fatalf("expected cached DB instance to match original")
 	}
 }
 

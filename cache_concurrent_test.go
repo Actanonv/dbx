@@ -3,8 +3,8 @@ package dbx
 import (
 	"context"
 	"fmt"
-	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -15,11 +15,6 @@ func TestCache_ThunderingHerdGetOrOpen(t *testing.T) {
 	tmp := t.TempDir()
 	dbName := "thundering_herd"
 
-	// Pre-create DB file
-	if _, err := createSQLiteDBFile(filepath.Join(tmp, dbName), tmp); err != nil {
-		t.Fatalf("createSQLiteDBFile failed: %v", err)
-	}
-
 	c := NewCache(10 * time.Minute)
 	defer c.Close()
 
@@ -28,18 +23,35 @@ func TestCache_ThunderingHerdGetOrOpen(t *testing.T) {
 	results := make([]*bun.DB, concurrency)
 	errors := make([]error, concurrency)
 
-	// Launch 50 simultaneous GetOrOpen calls
+	var initCount int64
+
+	// Launch 50 simultaneous GetOrOpen calls with WithOnInit hook
 	for i := 0; i < concurrency; i++ {
 		wg.Add(1)
 		go func(idx int) {
 			defer wg.Done()
-			db, err := c.GetOrOpen(dbName, WithDbFolder(tmp), WithDriverName(DriverSQLite))
+			db, err := c.GetOrOpen(dbName,
+				WithDbFolder(tmp),
+				WithDriverName(DriverSQLite),
+				WithOnInit(func(d *bun.DB) error {
+					atomic.AddInt64(&initCount, 1)
+					// Simulate initialization latency
+					time.Sleep(10 * time.Millisecond)
+					_, err := d.ExecContext(context.Background(), "CREATE TABLE init_tbl (id INT)")
+					return err
+				}),
+			)
 			results[idx] = db
 			errors[idx] = err
 		}(i)
 	}
 
 	wg.Wait()
+
+	// Verify OnInit was called EXACTLY once
+	if count := atomic.LoadInt64(&initCount); count != 1 {
+		t.Fatalf("expected WithOnInit to be called exactly 1 time, called %d times", count)
+	}
 
 	// Verify all goroutines got no error and the EXACT same *bun.DB instance
 	var firstDB *bun.DB
@@ -62,13 +74,6 @@ func TestCache_ConcurrentMultiTenantAccess(t *testing.T) {
 	tmp := t.TempDir()
 	tenantCount := 5
 	workersPerTenant := 6
-
-	for i := 0; i < tenantCount; i++ {
-		tName := fmt.Sprintf("tenant_%d", i)
-		if err := CreateDB(tName, CreateWithDriverName(DriverSQLite), CreateWithDbFolder(tmp)); err != nil {
-			t.Fatalf("CreateDB for tenant %d failed: %v", i, err)
-		}
-	}
 
 	c := NewCache(5 * time.Minute)
 	defer c.Close()
@@ -109,10 +114,6 @@ func TestCache_SetMethod(t *testing.T) {
 	tmp := t.TempDir()
 	dbName := "set_test"
 
-	if err := CreateDB(dbName, CreateWithDriverName(DriverSQLite), CreateWithDbFolder(tmp)); err != nil {
-		t.Fatalf("CreateDB failed: %v", err)
-	}
-
 	db, err := OpenDB(dbName, WithDbFolder(tmp), WithDriverName(DriverSQLite))
 	if err != nil {
 		t.Fatalf("OpenDB failed: %v", err)
@@ -141,9 +142,6 @@ func TestCache_SetMethod(t *testing.T) {
 func TestCache_ClosedStateOperations(t *testing.T) {
 	tmp := t.TempDir()
 	dbName := "closed_cache_test"
-	if err := CreateDB(dbName, CreateWithDriverName(DriverSQLite), CreateWithDbFolder(tmp)); err != nil {
-		t.Fatalf("CreateDB failed: %v", err)
-	}
 
 	c := NewCache(1 * time.Minute)
 	_ = c.Close()
@@ -172,10 +170,6 @@ func TestCache_ClosedStateOperations(t *testing.T) {
 func TestOpenDB_WithLog(t *testing.T) {
 	tmp := t.TempDir()
 	dbName := "log_test"
-
-	if err := CreateDB(dbName, CreateWithDriverName(DriverSQLite), CreateWithDbFolder(tmp)); err != nil {
-		t.Fatalf("CreateDB failed: %v", err)
-	}
 
 	// Open with WithLog(true)
 	db, err := OpenDB(dbName, WithDbFolder(tmp), WithDriverName(DriverSQLite), WithLog(true))

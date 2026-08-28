@@ -2,35 +2,34 @@ package dbx
 
 import (
 	"context"
-	"database/sql"
-	"embed"
+	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	_ "github.com/mattn/go-sqlite3"
+	"github.com/uptrace/bun"
 )
 
-//go:embed testmigrations/*.sql
-var testMigrations embed.FS
-
 func TestDbFilePath(t *testing.T) {
+	tmp := t.TempDir()
 	type args struct {
 		name     string
 		dbFolder string
 	}
 	tests := []struct {
-		name string
-		args args
-		want string
+		name     string
+		args     args
+		wantName string
 	}{
 		{
 			name: "with db folder",
 			args: args{
 				name:     "test",
-				dbFolder: "db",
+				dbFolder: tmp,
 			},
-			want: "db/test.db",
+			wantName: "test.db",
 		},
 		{
 			name: "without db folder",
@@ -38,35 +37,93 @@ func TestDbFilePath(t *testing.T) {
 				name:     "test",
 				dbFolder: "",
 			},
-			want: "test.db",
+			wantName: "test.db",
+		},
+		{
+			name: "with explicit extension",
+			args: args{
+				name:     "custom.db",
+				dbFolder: tmp,
+			},
+			wantName: "custom.db",
+		},
+		{
+			name: "with subfolder path",
+			args: args{
+				name:     "nested/tenant",
+				dbFolder: tmp,
+			},
+			wantName: "tenant.db",
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, _ := DbFilePath(tt.args.name, tt.args.dbFolder)
-			if got != tt.want {
-				t.Errorf("DbFilePath() got = %v, want %v", got, tt.want)
+			got, err := DbFilePath(tt.args.name, tt.args.dbFolder)
+			if err != nil {
+				t.Fatalf("DbFilePath() unexpected error: %v", err)
+			}
+			if !strings.HasSuffix(got, tt.wantName) {
+				t.Errorf("DbFilePath() got = %v, want suffix %v", got, tt.wantName)
 			}
 		})
 	}
 }
 
-func TestOpenDB_SQLitePragmas(t *testing.T) {
+func TestBuildDSN(t *testing.T) {
 	tmp := t.TempDir()
 
-	// ensure sqlite file exists via helper
-	dsn := filepath.Join(tmp, "opendbtest")
-	if _, err := createSQLiteDBFile(dsn, tmp); err != nil {
-		t.Fatalf("createSQLiteDBFile failed: %v", err)
-	}
+	t.Run("sqlite mattn", func(t *testing.T) {
+		dsn, err := BuildDSN("app", WithDbFolder(tmp), WithDriverName(DriverSQLite))
+		if err != nil {
+			t.Fatalf("BuildDSN failed: %v", err)
+		}
+		if !strings.HasPrefix(dsn, "file:") || !strings.Contains(dsn, "_journal_mode=WAL") {
+			t.Errorf("unexpected DSN for SQLite: %s", dsn)
+		}
+	})
 
-	db, err := OpenDB(dsn, WithDbFolder(tmp), WithDriverName(DriverSQLite))
+	t.Run("sqlite modernc", func(t *testing.T) {
+		dsn, err := BuildDSN("app", WithDbFolder(tmp), WithDriverName(DriverSQLiteMc))
+		if err != nil {
+			t.Fatalf("BuildDSN failed: %v", err)
+		}
+		if !strings.HasPrefix(dsn, "file:") || !strings.Contains(dsn, "_pragma=journal_mode(WAL)") {
+			t.Errorf("unexpected DSN for modernc SQLite: %s", dsn)
+		}
+	})
+
+	t.Run("postgres", func(t *testing.T) {
+		orig := "postgres://user:pass@localhost:5432/mydb?sslmode=disable"
+		dsn, err := BuildDSN(orig, WithDriverName(DriverPostgres))
+		if err != nil {
+			t.Fatalf("BuildDSN failed: %v", err)
+		}
+		if dsn != orig {
+			t.Errorf("BuildDSN() = %s; want %s", dsn, orig)
+		}
+	})
+}
+
+func TestOpenDB_AutoCreateAndPragmas(t *testing.T) {
+	tmp := t.TempDir()
+	nestedFolder := filepath.Join(tmp, "nested", "data")
+	name := "autocreatedb"
+
+	// OpenDB on a non-existent database file and non-existent parent directory
+	db, err := OpenDB(name, WithDbFolder(nestedFolder), WithDriverName(DriverSQLite))
 	if err != nil {
-		t.Fatalf("OpenDB failed: %v", err)
+		t.Fatalf("OpenDB auto-create failed: %v", err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
 
+	// Verify file was created
+	dbFile := filepath.Join(nestedFolder, name+".db")
+	if _, err := os.Stat(dbFile); err != nil {
+		t.Fatalf("expected db file to exist at %s: %v", dbFile, err)
+	}
+
 	ctx := context.Background()
+
 	// Verify WAL mode
 	var mode string
 	if err := db.QueryRowContext(ctx, "PRAGMA journal_mode;").Scan(&mode); err != nil {
@@ -86,140 +143,100 @@ func TestOpenDB_SQLitePragmas(t *testing.T) {
 	}
 }
 
-func TestMigrateDB_RunsMigrations(t *testing.T) {
+func TestOpenDB_WithOnInit(t *testing.T) {
 	tmp := t.TempDir()
-	name := "migratedbtest"
 
-	// Run migrations using embedded SQL files
-	if err := MigrateDB(name,
-		CreateWithDriverName(DriverSQLite),
-		CreateWithDbFolder(tmp),
-		CreateWithSource(testMigrations),
-		CreateWithSrcFolder("testmigrations"),
-	); err != nil {
-		t.Fatalf("MigrateDB failed: %v", err)
-	}
+	t.Run("success", func(t *testing.T) {
+		ctx := context.Background()
+		initExecuted := false
 
-	// Open the DB and verify the table exists and is usable
-	db, err := OpenDB(filepath.Join(tmp, name), WithDbFolder(tmp), WithDriverName(DriverSQLite))
-	if err != nil {
-		t.Fatalf("OpenDB after migration failed: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-
-	ctx := context.Background()
-	// Verify table exists via sqlite_master
-	var tbl string
-	q := "SELECT name FROM sqlite_master WHERE type='table' AND name='items'"
-	if err := db.QueryRowContext(ctx, q).Scan(&tbl); err != nil {
-		if err == sql.ErrNoRows {
-			t.Fatalf("items table not found after migration")
+		db, err := OpenDB("init_success",
+			WithDbFolder(tmp),
+			WithDriverName(DriverSQLite),
+			WithOnInit(func(db *bun.DB) error {
+				initExecuted = true
+				_, err := db.ExecContext(ctx, "CREATE TABLE users (id INTEGER PRIMARY KEY, email TEXT)")
+				return err
+			}),
+		)
+		if err != nil {
+			t.Fatalf("OpenDB with OnInit failed: %v", err)
 		}
-		t.Fatalf("query sqlite_master failed: %v", err)
-	}
-	if tbl != "items" {
-		t.Fatalf("expected table name 'items', got %q", tbl)
-	}
+		defer db.Close()
 
-	// Insert a row to ensure table is functional
-	if _, err := db.ExecContext(ctx, "INSERT INTO items(name) VALUES (?)", "foo"); err != nil {
-		t.Fatalf("insert after migration failed: %v", err)
+		if !initExecuted {
+			t.Fatalf("expected onInit callback to execute")
+		}
+
+		exists, err := TableExists(ctx, db, "users")
+		if err != nil {
+			t.Fatalf("TableExists failed: %v", err)
+		}
+		if !exists {
+			t.Fatalf("expected users table to exist after onInit")
+		}
+	})
+
+	t.Run("error rolls back and closes db", func(t *testing.T) {
+		expectedErr := errors.New("schema bootstrap failed")
+
+		db, err := OpenDB("init_fail",
+			WithDbFolder(tmp),
+			WithDriverName(DriverSQLite),
+			WithOnInit(func(db *bun.DB) error {
+				return expectedErr
+			}),
+		)
+		if err == nil {
+			db.Close()
+			t.Fatalf("expected error from failed onInit, got nil")
+		}
+		if !errors.Is(err, expectedErr) {
+			t.Fatalf("expected error to wrap %v, got %v", expectedErr, err)
+		}
+	})
+}
+
+func TestOpenDB_ModernC(t *testing.T) {
+	tmp := t.TempDir()
+	name := "modernc_db"
+
+	db, err := OpenDB(name, WithDbFolder(tmp), WithDriverName(DriverSQLiteMc))
+	if err != nil {
+		t.Fatalf("OpenDB with modernc failed: %v", err)
+	}
+	defer db.Close()
+
+	if err := db.Ping(); err != nil {
+		t.Fatalf("Ping failed: %v", err)
 	}
 }
 
-func TestCreateDB_CreatesFileAndRunsMigrations(t *testing.T) {
-	tmp := t.TempDir()
-	name := "createdbtest"
-
-	// Create DB which should also run migrations
-	if err := CreateDB(name,
-		CreateWithDriverName(DriverSQLite),
-		CreateWithDbFolder(tmp),
-		CreateWithSource(testMigrations),
-		CreateWithSrcFolder("testmigrations"),
-	); err != nil {
-		t.Fatalf("CreateDB failed: %v", err)
-	}
-
-	// DB file should exist
-	dbFile := filepath.Join(tmp, name+".db")
-	if _, err := os.Stat(dbFile); err != nil {
-		if os.IsNotExist(err) {
-			t.Fatalf("expected db file to be created: %s", dbFile)
-		}
-		t.Fatalf("stat db file failed: %v", err)
-	}
-
-	// Open and verify migration effects
-	db, err := OpenDB(filepath.Join(tmp, name), WithDbFolder(tmp), WithDriverName(DriverSQLite))
-	if err != nil {
-		t.Fatalf("OpenDB after CreateDB failed: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-
-	ctx := context.Background()
-	var tbl string
-	q := "SELECT name FROM sqlite_master WHERE type='table' AND name='items'"
-	if err := db.QueryRowContext(ctx, q).Scan(&tbl); err != nil {
-		if err == sql.ErrNoRows {
-			t.Fatalf("items table not found after CreateDB")
-		}
-		t.Fatalf("query sqlite_master failed: %v", err)
-	}
-	if tbl != "items" {
-		t.Fatalf("expected table name 'items', got %q", tbl)
-	}
-
-	// Verify WAL mode
-	var mode string
-	if err := db.QueryRowContext(ctx, "PRAGMA journal_mode;").Scan(&mode); err != nil {
-		t.Fatalf("query PRAGMA journal_mode failed: %v", err)
-	}
-	if mode != "wal" {
-		t.Fatalf("expected journal_mode=wal, got %q", mode)
-	}
-
-	if _, err := db.ExecContext(ctx, "INSERT INTO items(name) VALUES (?)", "bar"); err != nil {
-		t.Fatalf("insert after CreateDB failed: %v", err)
+func TestOpenDB_Errors(t *testing.T) {
+	// Invalid driver should return error
+	_, err := OpenDB("invalid_driver_db", WithDriverName("invalid_nonexistent_driver"))
+	if err == nil {
+		t.Fatal("expected error for invalid driver, got nil")
 	}
 }
+
 func TestTableExists(t *testing.T) {
 	tmp := t.TempDir()
 	name := "tableexiststest"
-
 	ctx := context.Background()
 
-	// Create DB
-	if err := CreateDB(name, CreateWithDriverName(DriverSQLite), CreateWithDbFolder(tmp)); err != nil {
-		t.Fatalf("CreateDB failed: %v", err)
-	}
-
-	// Verify the table can be created and WAL mode is set
-	dbCheck, err := OpenDB(filepath.Join(tmp, name), WithDbFolder(tmp), WithDriverName(DriverSQLite))
-	if err != nil {
-		t.Fatalf("OpenDB failed: %v", err)
-	}
-	var modeCheck string
-	if err := dbCheck.QueryRowContext(ctx, "PRAGMA journal_mode;").Scan(&modeCheck); err != nil {
-		t.Fatalf("query PRAGMA journal_mode failed: %v", err)
-	}
-	if modeCheck != "wal" {
-		t.Fatalf("expected journal_mode=wal, got %q", modeCheck)
-	}
-	dbCheck.Close()
-
-	// Open the DB
-	db, err := OpenDB(filepath.Join(tmp, name), WithDbFolder(tmp), WithDriverName(DriverSQLite))
+	db, err := OpenDB(name,
+		WithDbFolder(tmp),
+		WithDriverName(DriverSQLite),
+		WithOnInit(func(d *bun.DB) error {
+			_, err := d.ExecContext(ctx, "CREATE TABLE test_table (id INTEGER PRIMARY KEY, name TEXT)")
+			return err
+		}),
+	)
 	if err != nil {
 		t.Fatalf("OpenDB failed: %v", err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
-
-	// Create a test table
-	_, err = db.ExecContext(ctx, "CREATE TABLE test_table (id INTEGER PRIMARY KEY, name TEXT)")
-	if err != nil {
-		t.Fatalf("Failed to create test table: %v", err)
-	}
 
 	tests := []struct {
 		name      string
@@ -264,43 +281,6 @@ func TestTableExists(t *testing.T) {
 				t.Errorf("TableExists() got = %v, want %v", got, tt.want)
 			}
 		})
-	}
-}
-
-func TestOpenDB_Errors(t *testing.T) {
-	tmp := t.TempDir()
-	// Nonexistent SQLite file should fail
-	_, err := OpenDB("nonexistent_db", WithDbFolder(tmp), WithDriverName(DriverSQLite))
-	if err == nil {
-		t.Fatal("expected error opening non-existent DB, got nil")
-	}
-}
-
-func TestCreateDB_WithoutSource_ModernC(t *testing.T) {
-	tmp := t.TempDir()
-	name := "modernc_nosource"
-
-	// Create DB without source using DriverSQLiteMc
-	if err := CreateDB(name, CreateWithDriverName(DriverSQLiteMc), CreateWithDbFolder(tmp)); err != nil {
-		t.Fatalf("CreateDB with DriverSQLiteMc failed: %v", err)
-	}
-
-	db, err := OpenDB(name, WithDbFolder(tmp), WithDriverName(DriverSQLiteMc))
-	if err != nil {
-		t.Fatalf("OpenDB failed: %v", err)
-	}
-	defer db.Close()
-
-	if err := db.Ping(); err != nil {
-		t.Fatalf("Ping failed: %v", err)
-	}
-}
-
-func TestCreateDB_Errors(t *testing.T) {
-	// Invalid driver should return error
-	err := CreateDB("invalid_driver_db", CreateWithDriverName("invalid_nonexistent_driver"))
-	if err == nil {
-		t.Fatal("expected error for invalid driver, got nil")
 	}
 }
 

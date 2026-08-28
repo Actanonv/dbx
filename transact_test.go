@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -20,32 +19,25 @@ var (
 func setupTestDB(t *testing.T) *bun.DB {
 	t.Helper()
 
-	// Isolate DB files under a temp dir and configure package-level dbFolder
 	tmp := t.TempDir()
 	dbFolder = tmp
+	dsn := "testdb.sqlite"
 
-	// Use a unique filename per test
-	dsn := filepath.Join(tmp, "testdb.sqlite")
-
-	// Ensure the file exists because OpenDB expects an existing SQLite file path
-	if _, err := createSQLiteDBFile(dsn, dbFolder); err != nil {
-		t.Fatalf("createSQLiteDBFile failed: %v", err)
-	}
-
-	db, err := OpenDB(dsn, WithDbFolder(dbFolder), WithDriverName(DriverSQLite))
+	db, err := OpenDB(dsn,
+		WithDbFolder(dbFolder),
+		WithDriverName(DriverSQLite),
+		WithOnInit(func(d *bun.DB) error {
+			_, err := d.ExecContext(context.Background(), `
+				CREATE TABLE IF NOT EXISTS items (
+					id INTEGER PRIMARY KEY AUTOINCREMENT,
+					name TEXT NOT NULL
+				);
+			`)
+			return err
+		}),
+	)
 	if err != nil {
 		t.Fatalf("OpenDB failed: %v", err)
-	}
-
-	// basic schema for testing
-	_, err = db.ExecContext(context.Background(), `
-        CREATE TABLE IF NOT EXISTS items (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL
-        );
-    `)
-	if err != nil {
-		t.Fatalf("failed creating schema: %v", err)
 	}
 
 	return db

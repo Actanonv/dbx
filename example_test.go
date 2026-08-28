@@ -2,7 +2,6 @@ package dbx_test
 
 import (
 	"context"
-	"embed"
 	"fmt"
 	"log"
 	"os"
@@ -11,10 +10,8 @@ import (
 
 	"github.com/actanonv/dbx"
 	_ "github.com/mattn/go-sqlite3"
+	"github.com/uptrace/bun"
 )
-
-//go:embed testmigrations/*.sql
-var exampleMigrations embed.FS
 
 func ExampleOpenDB() {
 	tmpDir, err := os.MkdirTemp("", "dbx_example_open")
@@ -23,12 +20,7 @@ func ExampleOpenDB() {
 	}
 	defer os.RemoveAll(tmpDir)
 
-	// Create an empty database first
-	if err := dbx.CreateDB("example_app", dbx.CreateWithDbFolder(tmpDir)); err != nil {
-		log.Fatal(err)
-	}
-
-	// Open the database with options
+	// Open the database (automatically creates the SQLite file and applies WAL pragmas)
 	db, err := dbx.OpenDB("example_app",
 		dbx.WithDriverName(dbx.DriverSQLite),
 		dbx.WithDbFolder(tmpDir),
@@ -47,133 +39,57 @@ func ExampleOpenDB() {
 	// Database connection established successfully
 }
 
-func ExampleCreateDB() {
-	tmpDir, err := os.MkdirTemp("", "dbx_example_create")
+func ExampleWithOnInit() {
+	tmpDir, err := os.MkdirTemp("", "dbx_example_oninit")
 	if err != nil {
 		log.Fatal(err)
 	}
 	defer os.RemoveAll(tmpDir)
 
-	// Create a SQLite database and automatically apply migrations from embed.FS
-	err = dbx.CreateDB("store",
-		dbx.CreateWithDriverName(dbx.DriverSQLite),
-		dbx.CreateWithDbFolder(tmpDir),
-		dbx.WithSource(exampleMigrations),
-		dbx.WithSrcFolder("testmigrations"),
+	ctx := context.Background()
+
+	// Open the database and execute schema initialization safely before the DB is returned
+	db, err := dbx.OpenDB("store",
+		dbx.WithDriverName(dbx.DriverSQLite),
+		dbx.WithDbFolder(tmpDir),
+		dbx.WithOnInit(func(d *bun.DB) error {
+			_, err := d.ExecContext(ctx, "CREATE TABLE products (id INTEGER PRIMARY KEY, name TEXT)")
+			return err
+		}),
 	)
 	if err != nil {
 		log.Fatal(err)
 	}
+	defer db.Close()
 
-	ver, err := dbx.MigrationVersion("store",
-		dbx.CreateWithDbFolder(tmpDir),
-		dbx.WithSource(exampleMigrations),
-		dbx.WithSrcFolder("testmigrations"),
-	)
+	exists, err := dbx.TableExists(ctx, db, "products")
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	fmt.Printf("Database created at migration version: %d\n", ver)
+	fmt.Printf("Products table created: %t\n", exists)
 	// Output:
-	// Database created at migration version: 3
+	// Products table created: true
 }
 
-func ExampleMigrateDB() {
-	tmpDir, err := os.MkdirTemp("", "dbx_example_migrate")
+func ExampleBuildDSN() {
+	tmpDir, err := os.MkdirTemp("", "dbx_example_dsn")
 	if err != nil {
 		log.Fatal(err)
 	}
 	defer os.RemoveAll(tmpDir)
 
-	// Run all available migrations
-	err = dbx.MigrateDB("appdb",
-		dbx.CreateWithDriverName(dbx.DriverSQLite),
-		dbx.CreateWithDbFolder(tmpDir),
-		dbx.WithSource(exampleMigrations),
-		dbx.WithSrcFolder("testmigrations"),
+	dsn, err := dbx.BuildDSN("myapp",
+		dbx.WithDriverName(dbx.DriverSQLite),
+		dbx.WithDbFolder(tmpDir),
 	)
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	ver, err := dbx.MigrationVersion("appdb",
-		dbx.CreateWithDbFolder(tmpDir),
-		dbx.WithSource(exampleMigrations),
-		dbx.WithSrcFolder("testmigrations"),
-	)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	fmt.Printf("Migrated database to version: %d\n", ver)
+	fmt.Printf("DSN prefix: %s\n", dsn[:5])
 	// Output:
-	// Migrated database to version: 3
-}
-
-func ExampleMigrateUpTo() {
-	tmpDir, err := os.MkdirTemp("", "dbx_example_upto")
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer os.RemoveAll(tmpDir)
-
-	// Migrate forward to version 1 only
-	err = dbx.MigrateUpTo("appdb", 1,
-		dbx.CreateWithDriverName(dbx.DriverSQLite),
-		dbx.CreateWithDbFolder(tmpDir),
-		dbx.WithSource(exampleMigrations),
-		dbx.WithSrcFolder("testmigrations"),
-	)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	ver, err := dbx.MigrationVersion("appdb",
-		dbx.CreateWithDbFolder(tmpDir),
-		dbx.WithSource(exampleMigrations),
-		dbx.WithSrcFolder("testmigrations"),
-	)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	fmt.Printf("Targeted migration version: %d\n", ver)
-	// Output:
-	// Targeted migration version: 1
-}
-
-func ExampleRollbackMigration() {
-	tmpDir, err := os.MkdirTemp("", "dbx_example_rollback")
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer os.RemoveAll(tmpDir)
-
-	opts := []dbx.CreateOptFn{
-		dbx.CreateWithDriverName(dbx.DriverSQLite),
-		dbx.CreateWithDbFolder(tmpDir),
-		dbx.WithSource(exampleMigrations),
-		dbx.WithSrcFolder("testmigrations"),
-	}
-
-	// Apply all migrations (version 3)
-	_ = dbx.MigrateDB("appdb", opts...)
-
-	// Roll back 1 migration step (version 2)
-	err = dbx.RollbackMigration("appdb", opts...)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	ver, err := dbx.MigrationVersion("appdb", opts...)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	fmt.Printf("Version after rollback: %d\n", ver)
-	// Output:
-	// Version after rollback: 2
+	// DSN prefix: file:
 }
 
 func ExampleCache() {
@@ -183,13 +99,10 @@ func ExampleCache() {
 	}
 	defer os.RemoveAll(tmpDir)
 
-	// Pre-create database for tenant_1
-	_ = dbx.CreateDB("tenant_1", dbx.CreateWithDbFolder(tmpDir))
-
 	cache := dbx.NewCache(10 * time.Minute)
 	defer cache.Close()
 
-	// GetOrOpen acquires an existing connection or opens a new one
+	// GetOrOpen acquires an existing connection or opens and creates a new one
 	db, err := cache.GetOrOpen("tenant_1",
 		dbx.WithDbFolder(tmpDir),
 		dbx.WithDriverName(dbx.DriverSQLite),
@@ -212,8 +125,6 @@ func ExampleCache_Delete() {
 		log.Fatal(err)
 	}
 	defer os.RemoveAll(tmpDir)
-
-	_ = dbx.CreateDB("tenant_to_evict", dbx.CreateWithDbFolder(tmpDir))
 
 	cache := dbx.NewCache(10 * time.Minute)
 	defer cache.Close()
@@ -238,19 +149,20 @@ func ExampleTransact() {
 	}
 	defer os.RemoveAll(tmpDir)
 
-	_ = dbx.CreateDB("txdb",
-		dbx.CreateWithDbFolder(tmpDir),
-		dbx.WithSource(exampleMigrations),
-		dbx.WithSrcFolder("testmigrations"),
-	)
+	ctx := context.Background()
 
-	db, err := dbx.OpenDB("txdb", dbx.WithDbFolder(tmpDir))
+	db, err := dbx.OpenDB("txdb",
+		dbx.WithDbFolder(tmpDir),
+		dbx.WithOnInit(func(d *bun.DB) error {
+			_, err := d.ExecContext(ctx, "CREATE TABLE items (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT)")
+			return err
+		}),
+	)
 	if err != nil {
 		log.Fatal(err)
 	}
 	defer db.Close()
 
-	ctx := context.Background()
 	tx, err := dbx.NewTransact(ctx, db)
 	if err != nil {
 		log.Fatal(err)
@@ -288,19 +200,20 @@ func ExampleTableExists() {
 	}
 	defer os.RemoveAll(tmpDir)
 
-	_ = dbx.CreateDB("tbldb",
-		dbx.CreateWithDbFolder(tmpDir),
-		dbx.WithSource(exampleMigrations),
-		dbx.WithSrcFolder("testmigrations"),
-	)
+	ctx := context.Background()
 
-	db, err := dbx.OpenDB(filepath.Join(tmpDir, "tbldb"), dbx.WithDbFolder(tmpDir))
+	db, err := dbx.OpenDB(filepath.Join(tmpDir, "tbldb"),
+		dbx.WithDbFolder(tmpDir),
+		dbx.WithOnInit(func(d *bun.DB) error {
+			_, err := d.ExecContext(ctx, "CREATE TABLE items (id INTEGER PRIMARY KEY, name TEXT)")
+			return err
+		}),
+	)
 	if err != nil {
 		log.Fatal(err)
 	}
 	defer db.Close()
 
-	ctx := context.Background()
 	exists, err := dbx.TableExists(ctx, db, "items")
 	if err != nil {
 		log.Fatal(err)

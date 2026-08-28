@@ -1,21 +1,23 @@
-// Package dbx provides high-level database management, connection pooling,
-// multi-tenant caching, embedded schema migrations, and nested transaction management
+// Package dbx provides high-level database connection management, connection pooling,
+// multi-tenant caching, SQLite WAL optimization, and nested transaction management
 // built on top of the Bun ORM (https://bun.uptrace.dev/).
 //
 // # Core Features
 //
 //   - Optimized SQLite: Automatic configuration with WAL mode, synchronous=NORMAL,
-//     busy timeouts, in-memory temp stores, and connection pooling tailored for SQLite.
+//     busy timeouts, in-memory temp stores, auto-creation of directories/files,
+//     and connection pooling tailored for SQLite.
 //   - Multi-Driver Support: Seamless support for SQLite (both cgo mattn/go-sqlite3 and
 //     pure-Go modernc.org/sqlite), PostgreSQL, MySQL, and Microsoft SQL Server.
 //   - Connection Caching: Built-in thread-safe Cache for managing multiple database
-//     connections with automatic background eviction of inactive connections and
-//     single-tenant eviction (Delete).
-//   - Migration Lifecycle: Embedded migration execution and complete lifecycle management
-//     (MigrateDB, MigrateUpTo, MigrateDown, RollbackMigration, ResetMigrations, MigrationVersion)
-//     powered by Goose.
-//   - Robust Transactions: Transaction management supporting arbitrary levels of nested
+//     connections with per-key thundering-herd protection, automatic background eviction
+//     of inactive connections, and single-tenant eviction (Delete).
+//   - Lifecycle Initialization: WithOnInit hook for executing caller-driven schema bootstrap
+//     (e.g., schemagen or custom DDL) safely inside the thundering-herd lock before connections
+//     are returned or cached.
+//   - Robust Transactions: Stateful Transact manager supporting arbitrary levels of nested
 //     transactions via database savepoints with automatic panic recovery.
+//   - DSN & Path Utilities: Helper functions including BuildDSN, DbFilePath, and TableExists.
 //
 // # Quick Start
 //
@@ -30,9 +32,22 @@
 //	}
 //	defer db.Close()
 //
+// # Schema Initialization with WithOnInit
+//
+// You can supply an initialization callback to run schema setup (e.g., via schemagen)
+// immediately upon opening:
+//
+//	db, err := dbx.OpenDB("myapp",
+//	    dbx.WithDriverName(dbx.DriverSQLite),
+//	    dbx.WithOnInit(func(d *bun.DB) error {
+//	        _, err := d.ExecContext(ctx, "CREATE TABLE IF NOT EXISTS users (id INT PRIMARY KEY)")
+//	        return err
+//	    }),
+//	)
+//
 // # Multi-Tenant Database Caching
 //
-// In multi-tenant systems, the Cache manages multiple tenant database files efficiently:
+// In multi-tenant systems, the Cache manages multiple tenant database connections efficiently:
 //
 //	cache := dbx.NewCache(30 * time.Minute)
 //	defer cache.Close()
@@ -47,22 +62,6 @@
 //
 //	// Close and evict a specific tenant when unneeded
 //	_ = cache.Delete("tenant_42")
-//
-// # Embedded Migrations
-//
-// Schema migrations can be executed directly from embedded SQL files:
-//
-//	//go:embed migrations/*.sql
-//	var migrations embed.FS
-//
-//	err := dbx.MigrateDB("myapp",
-//	    dbx.WithSource(migrations),
-//	    dbx.WithSrcFolder("migrations"),
-//	    dbx.WithDbFolder("./data"),
-//	)
-//	if err != nil {
-//	    log.Fatal(err)
-//	}
 //
 // # Nested Transactions
 //
