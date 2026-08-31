@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/actanonv/dbx"
+	"github.com/actanonv/dbx/v2"
 	_ "github.com/mattn/go-sqlite3"
 	"github.com/uptrace/bun"
 )

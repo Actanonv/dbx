@@ -1,7 +1,7 @@
 # dbx
 
-[![Go Reference](https://pkg.go.dev/badge/github.com/actanonv/dbx.svg)](https://pkg.go.dev/github.com/actanonv/dbx)
-[![Go Report Card](https://goreportcard.com/badge/github.com/actanonv/dbx)](https://goreportcard.com/report/github.com/actanonv/dbx)
+[![Go Reference](https://pkg.go.dev/badge/github.com/actanonv/dbx/v2.svg)](https://pkg.go.dev/github.com/actanonv/dbx/v2)
+[![Go Report Card](https://goreportcard.com/badge/github.com/actanonv/dbx/v2)](https://goreportcard.com/report/github.com/actanonv/dbx/v2)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Go Version](https://img.shields.io/github/go-mod/go-version/actanonv/dbx)](https://golang.org)
 
@@ -19,7 +19,7 @@
 ## Installation
 
 ```bash
-go get github.com/actanonv/dbx
+go get github.com/actanonv/dbx/v2
 ```
 
 ## Breaking Changes in v2.0.0
@@ -43,7 +43,7 @@ import (
     "context"
     "log"
 
-    "github.com/actanonv/dbx"
+    "github.com/actanonv/dbx/v2"
     _ "github.com/mattn/go-sqlite3" // register driver in application
     "github.com/uptrace/bun"
 )

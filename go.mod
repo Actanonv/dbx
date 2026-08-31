@@ -1,4 +1,4 @@
-module github.com/actanonv/dbx
+module github.com/actanonv/dbx/v2
 
 go 1.25.1
 

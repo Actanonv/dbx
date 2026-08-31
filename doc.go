@@ -29,7 +29,7 @@
 //	import (
 //	    "log"
 //
-//	    "github.com/actanonv/dbx"
+//	    "github.com/actanonv/dbx/v2"
 //	    _ "github.com/mattn/go-sqlite3"
 //	)
 //
