@@ -10,6 +10,7 @@ import (
 
 	_ "github.com/mattn/go-sqlite3"
 	"github.com/uptrace/bun"
+	_ "modernc.org/sqlite"
 )
 
 func TestDbFilePath(t *testing.T) {

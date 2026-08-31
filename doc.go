@@ -21,7 +21,17 @@
 //
 // # Quick Start
 //
+// Applications importing dbx should register their desired database driver via a blank import
+// (e.g. `_ "github.com/mattn/go-sqlite3"` or `_ "modernc.org/sqlite"` for SQLite).
+//
 // To open a database connection:
+//
+//	import (
+//	    "log"
+//
+//	    "github.com/actanonv/dbx"
+//	    _ "github.com/mattn/go-sqlite3"
+//	)
 //
 //	db, err := dbx.OpenDB("myapp",
 //	    dbx.WithDriverName(dbx.DriverSQLite),

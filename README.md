@@ -26,6 +26,7 @@ go get github.com/actanonv/dbx
 
 `dbx` v2.0.0 streamlines the package scope by focusing strictly on database connection pooling, multi-tenant caching, SQLite WAL optimization, and nested transactions:
 
+- **Decoupled Database Drivers**: SQLite drivers (`github.com/mattn/go-sqlite3` and `modernc.org/sqlite`) are no longer bundled as direct dependencies of `dbx`. Applications importing `dbx` should explicitly register their preferred database driver via a blank import (e.g. `_ "github.com/mattn/go-sqlite3"` or `_ "modernc.org/sqlite"`).
 - **Migration Engine Decoupled**: All embedded Goose migration APIs (`MigrateDB`, `MigrateUpTo`, `MigrateDown`, `RollbackMigration`, `MigrateDownTo`, `ResetMigrations`, `MigrationVersion`, `MigrationStatus`) and the `goose` dependency have been removed. Schema management is delegated to external tools or Go libraries (e.g. `schemagen`).
 - **`CreateDB` Removed**: `CreateDB`, `CreateOptions`, `CreateOptFn`, `WithSource`, and `WithSrcFolder` are removed. `OpenDB` now automatically creates parent directories and SQLite database files on demand.
 - **`WithOnInit` Lifecycle Hook**: To initialize schemas or bootstrap tables dynamically (e.g., inside `Cache.GetOrOpen`), use the new `WithOnInit(func(db *bun.DB) error)` option.
@@ -35,14 +36,15 @@ go get github.com/actanonv/dbx
 
 ### Opening a Database Connection
 
-`dbx.OpenDB` handles driver-specific configurations, auto-creates parent folders/files for SQLite, and sets up connection pooling.
+`dbx.OpenDB` handles driver-specific configurations, auto-creates parent folders/files for SQLite, and sets up connection pooling. Make sure to register your driver of choice in your application (e.g., `_ "github.com/mattn/go-sqlite3"` or `_ "modernc.org/sqlite"`):
 
 ```go
 import (
     "context"
     "log"
-    
+
     "github.com/actanonv/dbx"
+    _ "github.com/mattn/go-sqlite3" // register driver in application
     "github.com/uptrace/bun"
 )
 

@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 	"time"
 
-	_ "github.com/mattn/go-sqlite3"
 	"github.com/uptrace/bun"
 	"github.com/uptrace/bun/dialect/mssqldialect"
 	"github.com/uptrace/bun/dialect/mysqldialect"
@@ -14,16 +13,18 @@ import (
 	"github.com/uptrace/bun/dialect/sqlitedialect"
 	"github.com/uptrace/bun/extra/bundebug"
 	"github.com/uptrace/bun/schema"
-	_ "modernc.org/sqlite"
 )
 
 // DriverName represents supported database driver identifiers.
+// Note: Per Go standard library conventions, database drivers must be registered
+// by the calling application via blank import (e.g. `_ "github.com/mattn/go-sqlite3"`
+// or `_ "modernc.org/sqlite"`).
 type DriverName string
 
 const (
-	// DriverSQLiteMc is the pure-Go SQLite driver identifier (modernc.org/sqlite).
+	// DriverSQLiteMc is the pure-Go SQLite driver identifier ("sqlite", modernc.org/sqlite).
 	DriverSQLiteMc DriverName = "sqlite"
-	// DriverSQLite is the cgo SQLite driver identifier (github.com/mattn/go-sqlite3).
+	// DriverSQLite is the cgo SQLite driver identifier ("sqlite3", github.com/mattn/go-sqlite3).
 	DriverSQLite DriverName = "sqlite3"
 	// DriverPostgres is the PostgreSQL standard driver identifier (postgres).
 	DriverPostgres DriverName = "postgres"
@@ -163,6 +164,9 @@ func BuildDSN(name string, opts ...OpenOptFn) (string, error) {
 
 // OpenDB opens a database connection and wraps it in a *bun.DB instance.
 //
+// Note: The calling application must register the required database driver via a blank import
+// (e.g. `_ "github.com/mattn/go-sqlite3"` or `_ "modernc.org/sqlite"` for SQLite).
+//
 // For SQLite, dsn should be the database file name (e.g. "myapp" or "myapp.db").
 // OpenDB automatically creates parent directories and the database file if needed,
 // applies WAL mode, foreign keys, synchronous=NORMAL, busy timeouts, and SQLite-tailored pool limits.
@@ -173,6 +177,8 @@ func BuildDSN(name string, opts ...OpenOptFn) (string, error) {
 // If the callback returns an error, the connection is closed and the error is returned.
 //
 // Example:
+//
+//	import _ "github.com/mattn/go-sqlite3" // register driver in calling app
 //
 //	db, err := dbx.OpenDB("myapp",
 //	    dbx.WithDriverName(dbx.DriverSQLite),
